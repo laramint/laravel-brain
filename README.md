@@ -16,7 +16,7 @@
 
 ---
 
-## What is LaraMint\LaravelBrain?
+## What is LaraMint\LaravelBrain??
 
 LaraMint\LaravelBrain is a premium developer tool that analyzes your Laravel codebase and renders an interactive node graph of your application's architecture. It traces every route through its controller, services, repositories, models, jobs, and events — giving you a bird's-eye view of the entire request lifecycle without reading a single line of code.
 
