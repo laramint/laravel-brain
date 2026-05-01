@@ -47,7 +47,24 @@ it('applies prefix from nested group', function () use ($fixtureProject) {
     expect($adminRoute->middlewares)->toContain('role:admin');
 });
 
-it('finds 5 routes total', function () use ($fixtureProject) {
+it('finds 5 routes total without extra globs', function () use ($fixtureProject) {
     $routes = (new RouteAnalyzer)->analyze($fixtureProject);
+    expect(count($routes))->toBe(5);
+});
+
+it('discovers module routes when an extra glob is provided', function () use ($fixtureProject) {
+    $routes = (new RouteAnalyzer)->analyze($fixtureProject, ['app/Modules/*/routes/*.php']);
+
+    expect(count($routes))->toBe(7); // 5 standard + 2 from module fixture
+
+    $register = findRoute($routes, fn ($r) => str_contains($r->uri, 'register'));
+    expect($register)->not->toBeNull();
+    expect($register->method)->toBe('POST');
+    expect($register->uri)->toBe('/api/v1/auth/register');
+});
+
+it('does not duplicate routes when a glob overlaps the routes/ directory', function () use ($fixtureProject) {
+    $routes = (new RouteAnalyzer)->analyze($fixtureProject, ['routes/*.php']);
+
     expect(count($routes))->toBe(5);
 });

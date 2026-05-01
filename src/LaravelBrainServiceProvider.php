@@ -11,10 +11,16 @@ class LaravelBrainServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        $this->mergeConfigFrom(__DIR__.'/../config/laravel-brain.php', 'laravel-brain');
+
         // Only register routes and commands in local environment for security
         if (! $this->app->isLocal()) {
             return;
         }
+
+        $this->publishes([
+            __DIR__.'/../config/laravel-brain.php' => config_path('laravel-brain.php'),
+        ], 'laravel-brain-config');
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'laravel-brain');
         $this->commands([ScanCommand::class]);

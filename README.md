@@ -114,6 +114,24 @@ GET /_laravel-brain
 
 LaravelBrain recursively scans your entire `routes/` directory — not just `web.php` and `api.php`. Any PHP file under `routes/**` is analyzed, including versioned files like `routes/v1/users.php` or module-specific files like `routes/modules/admin.php`.
 
+For **modular, DDD, or package-style projects** where routes are registered from service providers outside the `routes/` directory, publish the config and add glob patterns:
+
+```bash
+php artisan vendor:publish --tag=laravel-brain-config
+```
+
+```php
+// config/laravel-brain.php
+return [
+    'route_paths' => [
+        'app/Modules/*/routes/*.php',
+        // 'app/Domain/*/routes/*.php',
+    ],
+];
+```
+
+Patterns are relative to the project root and merged with the standard `routes/` scan. Overlapping paths are deduplicated automatically.
+
 ### Call chain tracing
 
 From each controller action, the tracer follows:

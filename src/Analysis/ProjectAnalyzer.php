@@ -82,7 +82,8 @@ class ProjectAnalyzer
         $this->emit('project:start', ['name' => $projectName, 'message' => "Analyzing project: {$projectName}"]);
 
         $this->emit('step:start', ['step' => 'routes', 'label' => 'Scanning routes', 'message' => '  → Scanning routes...']);
-        $routes = $this->routeAnalyzer->analyze($projectRoot);
+        $extraGlobs = function_exists('config') ? (array) config('laravel-brain.route_paths', []) : [];
+        $routes = $this->routeAnalyzer->analyze($projectRoot, $extraGlobs);
         $this->emit('step:done', ['step' => 'routes', 'count' => count($routes), 'unit' => 'route', 'message' => '    Found '.count($routes).' route(s)']);
 
         $this->emit('step:start', ['step' => 'middleware', 'label' => 'Scanning middleware', 'message' => '  → Scanning middleware...']);

@@ -36,12 +36,13 @@ class RouteAnalyzer
     }
 
     /**
+     * @param  string[]  $extraGlobs  Glob patterns relative to $projectRoot for additional route files
      * @return RouteDefinition[]
      */
-    public function analyze(string $projectRoot): array
+    public function analyze(string $projectRoot, array $extraGlobs = []): array
     {
         $routes = [];
-        $routeFiles = $this->findRouteFiles($projectRoot);
+        $routeFiles = $this->findRouteFiles($projectRoot, $extraGlobs);
 
         foreach ($routeFiles as $file) {
             $parsed = $this->parser->parse($file);
@@ -55,21 +56,35 @@ class RouteAnalyzer
         return $routes;
     }
 
-    private function findRouteFiles(string $projectRoot): array
+    /**
+     * @param  string[]  $extraGlobs  Glob patterns relative to $projectRoot
+     * @return string[]
+     */
+    private function findRouteFiles(string $projectRoot, array $extraGlobs = []): array
     {
-        $routesDir = rtrim($projectRoot, '/').'/routes';
-        if (! is_dir($routesDir)) {
-            return [];
+        $root = rtrim($projectRoot, '/');
+        $files = [];
+
+        // Always scan the standard routes/ directory
+        $routesDir = $root.'/routes';
+        if (is_dir($routesDir)) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($routesDir, \FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($iterator as $entry) {
+                if ($entry->isFile() && $entry->getExtension() === 'php') {
+                    $files[] = $entry->getPathname();
+                }
+            }
         }
 
-        $files = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($routesDir, \FilesystemIterator::SKIP_DOTS)
-        );
-
-        foreach ($iterator as $entry) {
-            if ($entry->isFile() && $entry->getExtension() === 'php') {
-                $files[] = $entry->getPathname();
+        // Scan any extra glob patterns, deduplicating against already-found files
+        foreach ($extraGlobs as $pattern) {
+            foreach (glob($root.'/'.$pattern) ?: [] as $file) {
+                if (! in_array($file, $files, true)) {
+                    $files[] = $file;
+                }
             }
         }
 
