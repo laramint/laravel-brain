@@ -9,4 +9,3 @@ class HealthController
         return ['status' => 'ok'];
     }
 }
-

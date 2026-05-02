@@ -2,7 +2,4 @@
 
 namespace Modules\Billing\Models;
 
-class Invoice
-{
-}
-
+class Invoice {}

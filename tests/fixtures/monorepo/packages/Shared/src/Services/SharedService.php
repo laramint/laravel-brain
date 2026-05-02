@@ -9,4 +9,3 @@ class SharedService
         return true;
     }
 }
-

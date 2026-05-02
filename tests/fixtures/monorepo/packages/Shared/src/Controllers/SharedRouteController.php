@@ -9,4 +9,3 @@ class SharedRouteController
         return ['ok' => true];
     }
 }
-

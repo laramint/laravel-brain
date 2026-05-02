@@ -167,8 +167,8 @@ class ScanCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $data
-     * @param array<string, float> $stepStartedAt
+     * @param  array<string, mixed>  $data
+     * @param  array<string, float>  $stepStartedAt
      */
     private function renderStepDone(array $data, array $stepStartedAt): void
     {
