@@ -39,9 +39,15 @@ class ControllerAnalyzer
 
     private array $psr4Map = [];
 
+    /** @var string[] */
+    private array $classSearchBases = [];
+
+    private ProjectStructure $projectStructure;
+
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     public function getPsr4Map(): array
@@ -55,7 +61,8 @@ class ControllerAnalyzer
      */
     public function analyze(string $projectRoot, array $routes): array
     {
-        $this->psr4Map = $this->buildPsr4Map($projectRoot);
+        $this->psr4Map = $this->projectStructure->buildPsr4Map($projectRoot);
+        $this->classSearchBases = $this->projectStructure->discoverClassSearchBases($projectRoot);
 
         $controllerFqcns = [];
         foreach ($routes as $route) {
@@ -66,7 +73,7 @@ class ControllerAnalyzer
 
         $definitions = [];
         foreach (array_keys($controllerFqcns) as $fqcn) {
-            $file = $this->resolveFile($fqcn, $projectRoot);
+            $file = $this->resolveFile($fqcn);
             if ($file === null || ! file_exists($file)) {
                 continue;
             }
@@ -188,50 +195,33 @@ class ControllerAnalyzer
         );
     }
 
-    private function buildPsr4Map(string $projectRoot): array
-    {
-        $composerJson = $projectRoot.'/composer.json';
-        if (! file_exists($composerJson)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($composerJson), true);
-        $map = [];
-
-        foreach (['autoload', 'autoload-dev'] as $section) {
-            foreach ($data[$section]['psr-4'] ?? [] as $namespace => $path) {
-                $map[rtrim($namespace, '\\')] = rtrim($projectRoot.'/'.$path, '/');
-            }
-        }
-
-        return $map;
-    }
-
-    private function resolveFile(string $fqcn, string $projectRoot): ?string
+    private function resolveFile(string $fqcn): ?string
     {
         foreach ($this->psr4Map as $namespace => $basePath) {
             if (str_starts_with($fqcn, $namespace.'\\')) {
                 $relative = substr($fqcn, strlen($namespace) + 1);
                 $filePath = $basePath.'/'.str_replace('\\', '/', $relative).'.php';
 
-                return $filePath;
+                if (file_exists($filePath)) {
+                    return $filePath;
+                }
             }
         }
 
-        // Fallback: try common locations using full relative path
+        // Fallback: try discovered class roots using full relative path
         $relative = str_replace('\\', '/', $fqcn).'.php';
-        foreach (['app/Http/Controllers/', 'app/', 'src/'] as $prefix) {
-            $path = $projectRoot.'/'.$prefix.$relative;
+        foreach ($this->classSearchBases as $base) {
+            $path = $base.'/'.$relative;
             if (file_exists($path)) {
                 return $path;
             }
         }
 
-        // Last resort: search by short class name inside app/ and src/
-        return $this->searchByClassName($fqcn, $projectRoot);
+        // Last resort: search by short class name inside discovered class roots
+        return $this->searchByClassName($fqcn);
     }
 
-    private function searchByClassName(string $fqcn, string $projectRoot): ?string
+    private function searchByClassName(string $fqcn): ?string
     {
         $shortName = str_contains($fqcn, '\\')
             ? substr($fqcn, strrpos($fqcn, '\\') + 1)
@@ -239,12 +229,7 @@ class ControllerAnalyzer
 
         $filename = $shortName.'.php';
 
-        foreach (['app', 'src'] as $dir) {
-            $base = $projectRoot.'/'.$dir;
-            if (! is_dir($base)) {
-                continue;
-            }
-
+        foreach ($this->classSearchBases as $base) {
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
             );

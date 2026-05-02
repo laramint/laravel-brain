@@ -3,6 +3,7 @@
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 
 $fixtureProject = __DIR__.'/../fixtures/laravel-project';
+$monorepoFixture = __DIR__.'/../fixtures/monorepo';
 
 function findRoute(array $routes, callable $predicate): mixed
 {
@@ -50,4 +51,19 @@ it('applies prefix from nested group', function () use ($fixtureProject) {
 it('finds 5 routes total', function () use ($fixtureProject) {
     $routes = (new RouteAnalyzer)->analyze($fixtureProject);
     expect(count($routes))->toBe(5);
+});
+
+it('scans nested routes inside monorepo layouts regardless of container folder name', function () use ($monorepoFixture) {
+    $routes = (new RouteAnalyzer)->analyze($monorepoFixture);
+    $nested = findRoute($routes, fn ($r) => $r->uri === '/billing/invoices' && $r->method === 'GET');
+    $shared = findRoute($routes, fn ($r) => $r->uri === '/shared/ping' && $r->method === 'GET');
+    $extension = findRoute($routes, fn ($r) => $r->uri === '/payroll/employees' && $r->method === 'GET');
+
+    expect($routes)->toHaveCount(4);
+    expect($nested)->not->toBeNull();
+    expect($nested->controller)->toBe('Modules\\Billing\\Http\\Controllers\\InvoiceController');
+    expect($shared)->not->toBeNull();
+    expect($shared->controller)->toBe('Shared\\Controllers\\SharedRouteController');
+    expect($extension)->not->toBeNull();
+    expect($extension->controller)->toBe('Extensions\\PayrollHub\\Http\\Controllers\\EmployeeController');
 });

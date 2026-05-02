@@ -23,6 +23,11 @@ class ModelAnalyzer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
+    /** @var string[] */
+    private array $classSearchBases = [];
+
     public const RELATIONSHIP_METHODS = [
         'hasOne', 'hasMany', 'hasOneThrough', 'hasManyThrough',
         'belongsTo', 'belongsToMany',
@@ -32,6 +37,7 @@ class ModelAnalyzer
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -40,11 +46,12 @@ class ModelAnalyzer
      */
     public function analyze(string $projectRoot, array $fqcns): array
     {
-        $psr4Map = $this->buildPsr4Map($projectRoot);
+        $psr4Map = $this->projectStructure->buildPsr4Map($projectRoot);
+        $this->classSearchBases = $this->projectStructure->discoverClassSearchBases($projectRoot);
         $definitions = [];
 
         foreach (array_unique($fqcns) as $fqcn) {
-            $file = $this->resolveFile($fqcn, $projectRoot, $psr4Map);
+            $file = $this->resolveFile($fqcn, $psr4Map);
             if ($file === null || ! file_exists($file)) {
                 continue;
             }
@@ -155,31 +162,45 @@ class ModelAnalyzer
         );
     }
 
-    private function buildPsr4Map(string $projectRoot): array
-    {
-        $composerJson = $projectRoot.'/composer.json';
-        if (! file_exists($composerJson)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($composerJson), true);
-        $map = [];
-        foreach (['autoload', 'autoload-dev'] as $section) {
-            foreach ($data[$section]['psr-4'] ?? [] as $ns => $path) {
-                $map[rtrim($ns, '\\')] = rtrim($projectRoot.'/'.$path, '/');
-            }
-        }
-
-        return $map;
-    }
-
-    private function resolveFile(string $fqcn, string $projectRoot, array $psr4Map): ?string
+    private function resolveFile(string $fqcn, array $psr4Map): ?string
     {
         foreach ($psr4Map as $namespace => $basePath) {
             if (str_starts_with($fqcn, $namespace.'\\')) {
                 $relative = substr($fqcn, strlen($namespace) + 1);
+                $path = $basePath.'/'.str_replace('\\', '/', $relative).'.php';
+                if (file_exists($path)) {
+                    return $path;
+                }
+            }
+        }
 
-                return $basePath.'/'.str_replace('\\', '/', $relative).'.php';
+        $relative = str_replace('\\', '/', $fqcn).'.php';
+        foreach ($this->classSearchBases as $base) {
+            $path = $base.'/'.$relative;
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        return $this->searchByClassName($fqcn);
+    }
+
+    private function searchByClassName(string $fqcn): ?string
+    {
+        $shortName = str_contains($fqcn, '\\')
+            ? substr($fqcn, strrpos($fqcn, '\\') + 1)
+            : $fqcn;
+        $filename = $shortName.'.php';
+
+        foreach ($this->classSearchBases as $base) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($iterator as $file) {
+                if ($file->getFilename() === $filename) {
+                    return $file->getPathname();
+                }
             }
         }
 

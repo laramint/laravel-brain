@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useMemo } from 'react'
+import { useRef, useState, useCallback, useMemo, useEffect } from 'react'
 import { FilterPanel } from './FilterPanel'
 import type { TabEntry } from '../types/graph'
 
@@ -25,10 +25,10 @@ interface Props {
 }
 
 const METHOD_COLORS: Record<string, string> = {
-  GET:    '#4ade80',
-  POST:   '#60a5fa',
-  PUT:    '#f59e0b',
-  PATCH:  '#a78bfa',
+  GET: '#4ade80',
+  POST: '#60a5fa',
+  PUT: '#f59e0b',
+  PATCH: '#a78bfa',
   DELETE: '#f87171',
 }
 
@@ -41,12 +41,13 @@ function RouteItem({ tab, isActive, isLoading, onSelect }: {
   const [first, ...rest] = tab.label.split(' ')
   const hasMethod = first in METHOD_COLORS
   const method = hasMethod ? first : null
-  const uri    = hasMethod ? rest.join(' ') : tab.label
-  const color  = method ? METHOD_COLORS[method] : '#94a3b8'
+  const uri = hasMethod ? rest.join(' ') : tab.label
+  const color = method ? METHOD_COLORS[method] : '#94a3b8'
 
   return (
     <button
       className={`left-nav-item ${isActive ? 'left-nav-item--active' : ''}`}
+      type="button"
       onClick={() => onSelect(tab)}
       title={`${tab.nodeCount} nodes · ${tab.edgeCount} edges`}
     >
@@ -74,6 +75,65 @@ export function LeftSidebar({
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
   const [expandedPrefixes, setExpandedPrefixes] = useState<Set<string>>(new Set())
 
+  useEffect(() => {
+    if (fileGroups.length === 0) return
+
+    setExpandedFiles((prev) => {
+      const next = new Set(prev)
+      for (const fg of fileGroups) next.add(fg.fileName)
+      return next
+    })
+
+    setExpandedPrefixes((prev) => {
+      const next = new Set(prev)
+      for (const fg of fileGroups) {
+        for (const pg of fg.prefixGroups) {
+          if (pg.prefix === '_flat') continue
+          next.add(`${fg.fileName}::${pg.prefix}`)
+        }
+      }
+      return next
+    })
+  }, [fileGroups])
+
+  useEffect(() => {
+    if (!activeId) return
+
+    let targetFile: string | null = null
+    let targetPrefixKey: string | null = null
+
+    for (const fg of fileGroups) {
+      for (const pg of fg.prefixGroups) {
+        if (!pg.tabs.some((tab) => tab.id === activeId)) continue
+
+        targetFile = fg.fileName
+        if (pg.prefix !== '_flat') {
+          targetPrefixKey = `${fg.fileName}::${pg.prefix}`
+        }
+        break
+      }
+      if (targetFile) break
+    }
+
+    if (targetFile) {
+      setExpandedFiles((prev) => {
+        if (prev.has(targetFile!)) return prev
+        const next = new Set(prev)
+        next.add(targetFile!)
+        return next
+      })
+    }
+
+    if (targetPrefixKey) {
+      setExpandedPrefixes((prev) => {
+        if (prev.has(targetPrefixKey!)) return prev
+        const next = new Set(prev)
+        next.add(targetPrefixKey!)
+        return next
+      })
+    }
+  }, [activeId, fileGroups])
+
   const toggleFile = (fileName: string) =>
     setExpandedFiles((s) => {
       const n = new Set(s)
@@ -95,6 +155,20 @@ export function LeftSidebar({
       }
       return n
     })
+
+  const onFileHeaderClick = (fg: FileGroup, isOpen: boolean) => {
+    toggleFile(fg.fileName)
+
+    if (isOpen) return
+
+    const flatGroup = fg.prefixGroups.length === 1 && fg.prefixGroups[0].prefix === '_flat'
+      ? fg.prefixGroups[0]
+      : null
+
+    if (flatGroup && flatGroup.tabs.length === 1) {
+      onSelect(flatGroup.tabs[0])
+    }
+  }
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -132,7 +206,6 @@ export function LeftSidebar({
   return (
     <div className="left-sidebar" ref={containerRef}>
       <div className="left-sidebar-top" style={{ height: topHeight }}>
-
         <div className="left-nav-search">
           <input
             className="left-nav-search-input"
@@ -142,18 +215,27 @@ export function LeftSidebar({
             onChange={(e) => setSearch(e.target.value)}
           />
           {search && (
-            <button className="left-nav-search-clear" onClick={() => setSearch('')}>×</button>
+            <button
+              className="left-nav-search-clear"
+              type="button"
+              onClick={() => setSearch('')}
+            >
+              ×
+            </button>
           )}
         </div>
+
         <div className="left-nav">
           {filteredFileGroups.map((fg) => {
             const fileOpen = expandedFiles.has(fg.fileName)
             const totalRoutes = fg.prefixGroups.reduce((s, pg) => s + pg.tabs.length, 0)
+
             return (
               <div key={fg.fileName} className="left-nav-file-group">
                 <button
                   className="left-nav-file-header"
-                  onClick={() => toggleFile(fg.fileName)}
+                  type="button"
+                  onClick={() => onFileHeaderClick(fg, fileOpen)}
                   title={fg.fileName}
                 >
                   <span className="left-nav-file-chevron">{fileOpen ? '▾' : '▸'}</span>
@@ -168,7 +250,6 @@ export function LeftSidebar({
                 </button>
 
                 {fileOpen && fg.prefixGroups.map((pg) => {
-                  // '_flat' = non-HTTP tabs (commands/channels): no prefix wrapper
                   if (pg.prefix === '_flat') {
                     return pg.tabs.map((tab) => (
                       <RouteItem
@@ -188,6 +269,7 @@ export function LeftSidebar({
                     <div key={pg.prefix} className="left-nav-prefix-group">
                       <button
                         className="left-nav-prefix-header"
+                        type="button"
                         onClick={() => togglePrefix(prefixKey)}
                       >
                         <span className="left-nav-prefix-chevron">{prefixOpen ? '▾' : '▸'}</span>

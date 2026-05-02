@@ -4,6 +4,7 @@ use LaraMint\LaravelBrain\Analysis\ControllerAnalyzer;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 
 $fixtureProject = __DIR__.'/../fixtures/laravel-project';
+$monorepoFixture = __DIR__.'/../fixtures/monorepo';
 
 it('resolves controller files from routes', function () use ($fixtureProject) {
     $routes = (new RouteAnalyzer)->analyze($fixtureProject);
@@ -47,4 +48,16 @@ it('finds methods on controllers', function () use ($fixtureProject) {
     expect($methodNames)->toContain('store');
     expect($methodNames)->toContain('show');
     expect($methodNames)->toContain('destroy');
+});
+
+it('resolves controllers from nested module composer roots', function () use ($monorepoFixture) {
+    $routes = (new RouteAnalyzer)->analyze($monorepoFixture);
+    $controllers = (new ControllerAnalyzer)->analyze($monorepoFixture, $routes);
+
+    expect($controllers)->toHaveKey('Modules\\Billing\\Http\\Controllers\\InvoiceController');
+    expect($controllers['Modules\\Billing\\Http\\Controllers\\InvoiceController']->constructorDeps)
+        ->toHaveKey('invoiceService');
+    expect($controllers['Modules\\Billing\\Http\\Controllers\\InvoiceController']->constructorDeps)
+        ->toHaveKey('sharedService');
+    expect($controllers)->toHaveKey('Shared\\Controllers\\SharedRouteController');
 });

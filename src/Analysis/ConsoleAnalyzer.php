@@ -34,9 +34,12 @@ class ConsoleAnalyzer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -48,24 +51,28 @@ class ConsoleAnalyzer
         $schedule = [];
 
         // 1. routes/console.php (and any file with "console" in its name)
-        foreach ($this->findFilesContaining($projectRoot.'/routes', 'console') as $file) {
-            $result = $this->parseConsoleRouteFile($file);
-            $commands = array_merge($commands, $result['commands']);
-            $schedule = array_merge($schedule, $result['schedule']);
+        foreach ($this->projectStructure->discoverRouteDirectories($projectRoot) as $routesDir) {
+            foreach ($this->findFilesContaining($routesDir, 'console') as $file) {
+                $result = $this->parseConsoleRouteFile($file);
+                $commands = array_merge($commands, $result['commands']);
+                $schedule = array_merge($schedule, $result['schedule']);
+            }
         }
 
-        // 2. app/Console/Commands/** — command classes
-        $commandsDir = $projectRoot.'/app/Console/Commands';
-        if (is_dir($commandsDir)) {
-            $commands = array_merge($commands, $this->scanCommandClasses($commandsDir));
-        }
+        foreach ($this->projectStructure->discoverRoots($projectRoot) as $root) {
+            // 2. app/Console/Commands/** — command classes
+            $commandsDir = $root.'/app/Console/Commands';
+            if (is_dir($commandsDir)) {
+                $commands = array_merge($commands, $this->scanCommandClasses($commandsDir));
+            }
 
-        // 3. app/Console/Kernel.php — $commands property + schedule() method
-        $kernelFile = $projectRoot.'/app/Console/Kernel.php';
-        if (file_exists($kernelFile)) {
-            $result = $this->parseKernel($kernelFile);
-            $commands = array_merge($commands, $result['commands']);
-            $schedule = array_merge($schedule, $result['schedule']);
+            // 3. app/Console/Kernel.php — $commands property + schedule() method
+            $kernelFile = $root.'/app/Console/Kernel.php';
+            if (file_exists($kernelFile)) {
+                $result = $this->parseKernel($kernelFile);
+                $commands = array_merge($commands, $result['commands']);
+                $schedule = array_merge($schedule, $result['schedule']);
+            }
         }
 
         // Deduplicate: class/route-sourced entries win over kernel entries.

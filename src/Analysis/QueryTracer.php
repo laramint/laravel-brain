@@ -41,12 +41,21 @@ class QueryTracer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     /** @var array<string, array|null> file path → parse result cache */
     private array $parseCache = [];
+
+    /** @var string[] */
+    private array $classSearchBases = [];
+
+    /** @var array<string, string> */
+    private array $resolvedPsr4Map = [];
 
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -63,6 +72,9 @@ class QueryTracer
         array $psr4Map,
         string $projectRoot,
     ): array {
+        $this->classSearchBases = $this->projectStructure->discoverClassSearchBases($projectRoot);
+        $this->resolvedPsr4Map = $psr4Map + $this->projectStructure->buildPsr4Map($projectRoot);
+
         // Build outgoing adjacency from the call chain
         $outgoing = []; // "fqcn::method" => CallChainEdge[]
         foreach ($callChain as $edge) {
@@ -121,7 +133,7 @@ class QueryTracer
                     [$visitedFqcn, $visitedMethod] = explode('::', $visitedKey, 2);
                     $queries = array_merge(
                         $queries,
-                        $this->scanClassMethodForDbCalls($visitedFqcn, $visitedMethod, $psr4Map, $projectRoot),
+                        $this->scanClassMethodForDbCalls($visitedFqcn, $visitedMethod),
                     );
                 }
 
@@ -159,10 +171,8 @@ class QueryTracer
     private function scanClassMethodForDbCalls(
         string $fqcn,
         string $method,
-        array $psr4Map,
-        string $projectRoot,
     ): array {
-        $file = $this->resolveFile($fqcn, $psr4Map, $projectRoot);
+        $file = $this->resolveFile($fqcn);
         if ($file === null || ! file_exists($file)) {
             return [];
         }
@@ -211,9 +221,9 @@ class QueryTracer
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private function resolveFile(string $fqcn, array $psr4Map, string $projectRoot): ?string
+    private function resolveFile(string $fqcn): ?string
     {
-        foreach ($psr4Map as $namespace => $basePath) {
+        foreach ($this->resolvedPsr4Map as $namespace => $basePath) {
             if (str_starts_with($fqcn, $namespace.'\\')) {
                 $relative = substr($fqcn, strlen($namespace) + 1);
                 $path = $basePath.'/'.str_replace('\\', '/', $relative).'.php';
@@ -222,12 +232,35 @@ class QueryTracer
                 }
             }
         }
-        // Fallback: common locations
+
+        // Fallback: discovered class roots
         $relative = str_replace('\\', '/', $fqcn).'.php';
-        foreach (['app/', 'src/'] as $prefix) {
-            $path = $projectRoot.'/'.$prefix.$relative;
+        foreach ($this->classSearchBases as $base) {
+            $path = $base.'/'.$relative;
             if (file_exists($path)) {
                 return $path;
+            }
+        }
+
+        return $this->searchByClassName($fqcn);
+    }
+
+    private function searchByClassName(string $fqcn): ?string
+    {
+        $shortName = str_contains($fqcn, '\\')
+            ? substr($fqcn, strrpos($fqcn, '\\') + 1)
+            : $fqcn;
+        $filename = $shortName.'.php';
+
+        foreach ($this->classSearchBases as $base) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($iterator as $file) {
+                if ($file->getFilename() === $filename) {
+                    return $file->getPathname();
+                }
             }
         }
 

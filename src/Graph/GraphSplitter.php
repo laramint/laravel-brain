@@ -43,7 +43,8 @@ class GraphSplitter
         string $projectName,
         string $analyzedAt,
     ): array {
-        // Group routes by tabGroup
+        // Always keep route-level tabs so sidebar file groups (e.g. web.php)
+        // can expand to their contained routes.
         $routesByTab = [];
         foreach ($routes as $route) {
             $routesByTab[$route->tabGroup][] = $route;
@@ -58,11 +59,15 @@ class GraphSplitter
         //    does NOT fan out to ALL sibling actions.
         // 2. Bidirectional (for the "all" tab only, kept for reference)
         $fwdAdj = $this->buildForwardAdjacency($fullGraph);
+        $allNodes = $fullGraph->nodes();
+        $allEdges = $fullGraph->edges();
 
         $subgraphs = [];
         $manifest = [];
 
         foreach ($routesByTab as $tabGroup => $tabRoutes) {
+            $routeFileLabel = $this->relativeRouteFile($tabRoutes[0]->file);
+            $label = $tabGroup;
             $tabId = $this->sanitizeId($tabGroup);
 
             // Seed with:
@@ -79,17 +84,17 @@ class GraphSplitter
                 }
             }
 
-            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, $seeds, $projectName, $analyzedAt);
+            $subgraph = $this->extractSubgraphForward($allNodes, $allEdges, $fwdAdj, $seeds, $projectName, $analyzedAt);
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(
                 id: $tabId,
-                label: $tabGroup,
+                label: $label,
                 routeCount: count($tabRoutes),
                 nodeCount: $subgraph->nodeCount(),
                 edgeCount: $subgraph->edgeCount(),
                 file: ".graph-{$tabId}.json",
-                routeFile: $this->relativeRouteFile($tabRoutes[0]->file),
+                routeFile: $routeFileLabel,
             );
 
             // Help GC between large splits
@@ -100,7 +105,7 @@ class GraphSplitter
         foreach ($commands as $cmd) {
             $tabId = $this->sanitizeId('cmd '.$cmd->signature);
             $seedId = "command::{$cmd->signature}";
-            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, [$seedId], $projectName, $analyzedAt);
+            $subgraph = $this->extractSubgraphForward($allNodes, $allEdges, $fwdAdj, [$seedId], $projectName, $analyzedAt);
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(
@@ -119,7 +124,7 @@ class GraphSplitter
         foreach ($channels as $ch) {
             $tabId = $this->sanitizeId('channel '.$ch->name);
             $seedId = 'channel::'.md5($ch->name);
-            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, [$seedId], $projectName, $analyzedAt);
+            $subgraph = $this->extractSubgraphForward($allNodes, $allEdges, $fwdAdj, [$seedId], $projectName, $analyzedAt);
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(
@@ -142,7 +147,7 @@ class GraphSplitter
                 $seeds[] = 'schedule::'.md5($entry->type.$entry->target.$entry->frequency);
             }
             $tabId = 'schedule--tasks';
-            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, $seeds, $projectName, $analyzedAt);
+            $subgraph = $this->extractSubgraphForward($allNodes, $allEdges, $fwdAdj, $seeds, $projectName, $analyzedAt);
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(
@@ -224,7 +229,8 @@ class GraphSplitter
     }
 
     private function extractSubgraphForward(
-        Graph $fullGraph,
+        array $allNodes,
+        array $allEdges,
         array $fwdAdj,
         array $seeds,
         string $projectName,
@@ -235,12 +241,12 @@ class GraphSplitter
         $sub = new Graph;
         $sub->setMeta(['project' => $projectName, 'analyzedAt' => $analyzedAt]);
 
-        foreach ($fullGraph->nodes() as $node) {
+        foreach ($allNodes as $node) {
             if (isset($reachable[$node->id])) {
                 $sub->addNode($node);
             }
         }
-        foreach ($fullGraph->edges() as $edge) {
+        foreach ($allEdges as $edge) {
             if (isset($reachable[$edge->source]) && isset($reachable[$edge->target])) {
                 $sub->addEdge($edge);
             }
@@ -252,10 +258,11 @@ class GraphSplitter
     private function bfs(array $adj, array $seeds): array
     {
         $visited = [];
-        $queue = $seeds;
+        $queue = array_values($seeds);
+        $index = 0;
 
-        while (! empty($queue)) {
-            $id = array_shift($queue);
+        while ($index < count($queue)) {
+            $id = $queue[$index++];
             if (isset($visited[$id])) {
                 continue;
             }
@@ -275,12 +282,20 @@ class GraphSplitter
         if ($fullPath === '') {
             return 'routes.php';
         }
-        // Extract path relative to the routes/ directory, e.g. "v1/users.php"
-        if (preg_match('#[/\\\\]routes[/\\\\](.+)$#', $fullPath, $m)) {
-            return str_replace('\\', '/', $m[1]);
+
+        $normalized = str_replace('\\', '/', $fullPath);
+
+        // Keep package context for package route files, e.g. "packages/Hrm/src/Routes/web.php"
+        if (preg_match('#/(packages/[^/]+/src/routes/.+)$#i', $normalized, $m)) {
+            return $m[1];
         }
 
-        return basename($fullPath);
+        // Extract path relative to any routes/ directory, e.g. "v1/users.php"
+        if (preg_match('#/routes/(.+)$#i', $normalized, $m)) {
+            return $m[1];
+        }
+
+        return basename($normalized);
     }
 
     private function sanitizeId(string $group): string

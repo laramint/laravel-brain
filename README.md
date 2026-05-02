@@ -25,7 +25,8 @@ LaraMint\LaravelBrain is a developer tool that analyzes your Laravel codebase an
 - **Full lifecycle tracing** — Follows every route from HTTP verb → controller → service → repository → model → events/jobs
 - **Artisan command discovery** — Maps class-based commands, closure commands from `routes/console.php`, and Kernel-registered commands
 - **Scheduler tracing** — Visualizes scheduled tasks (`command`, `job`, `call`) with their frequency
-- **Broadcast channel mapping** — Discovers class-based and closure channels from `routes/channels.php`
+- **Monorepo-aware scanning** � Auto-discovers nested Laravel apps, modules, and package roots (not just top-level `app/` and `routes/`)
+outes/)
 - **DB query tracing** — Surfaces Eloquent and raw queries per method
 - **Fat-class detection** — Flags controllers and services with more than 300 lines or 10 methods
 - **Interactive graph** — Dark/light theme, accent-colored nodes, and interactive edges
@@ -112,7 +113,7 @@ GET /_laravel-brain
 
 ### Route discovery
 
-LaravelBrain recursively scans your entire `routes/` directory — not just `web.php` and `api.php`. Any PHP file under `routes/**` is analyzed, including versioned files like `routes/v1/users.php` or module-specific files like `routes/modules/admin.php`.
+LaravelBrain recursively scans every discovered Laravel root in your workspace. That includes nested microservices, modules, and local packages. Any PHP file under each `routes/**` is analyzed, not just top-level `web.php` and `api.php`.
 
 ### Call chain tracing
 

@@ -12,6 +12,7 @@ use LaraMint\LaravelBrain\Analysis\DbQuery;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
+use LaraMint\LaravelBrain\Analysis\ProjectStructure;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Parser\PhpFileParser;
@@ -22,6 +23,10 @@ use PhpParser\NodeVisitorAbstract;
 
 class GraphBuilder
 {
+    private const LIGHT_MODE_ROUTE_THRESHOLD = 1200;
+
+    private const LIGHT_MODE_CALL_EDGE_THRESHOLD = 6000;
+
     private Graph $graph;
 
     private int $edgeCounter = 0;
@@ -30,7 +35,12 @@ class GraphBuilder
 
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     private array $psr4Map = [];
+
+    /** @var string[] */
+    private array $classSearchBases = [];
 
     /** @var array<string, array> file path => parsed result cache */
     private array $parseCache = [];
@@ -46,11 +56,14 @@ class GraphBuilder
     /** @var array<string, DbQuery[]> "FQCN::method" => DbQuery[] */
     private array $dbQueryMap = [];
 
+    private bool $lightMode = false;
+
     public function __construct()
     {
         $this->graph = new Graph;
         $this->flowExtractor = new FlowExtractor;
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -59,9 +72,11 @@ class GraphBuilder
      */
     private function buildFullPsr4Map(string $projectRoot): array
     {
+        $map = $this->projectStructure->buildPsr4Map($projectRoot);
+
         $autoloadFile = $projectRoot.'/vendor/composer/autoload_psr4.php';
         if (! file_exists($autoloadFile)) {
-            return [];
+            return $map;
         }
 
         // The file uses $vendorDir / $baseDir variables
@@ -69,10 +84,12 @@ class GraphBuilder
         $baseDir = $projectRoot;
 
         $raw = require $autoloadFile;
-        $map = [];
         foreach ($raw as $namespace => $paths) {
             foreach ((array) $paths as $path) {
-                $map[rtrim($namespace, '\\')] = rtrim($path, '/');
+                $ns = rtrim($namespace, '\\');
+                if (! isset($map[$ns])) {
+                    $map[$ns] = rtrim($path, '/');
+                }
                 break; // take first path per namespace
             }
         }
@@ -95,7 +112,42 @@ class GraphBuilder
             }
         }
 
+        $relative = str_replace('\\', '/', $fqcn).'.php';
+        foreach ($this->classSearchBases as $base) {
+            $path = $base.'/'.$relative;
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        $fallback = $this->searchByClassName($fqcn);
+        if ($fallback !== null) {
+            return $fallback;
+        }
+
         return '';
+    }
+
+    private function searchByClassName(string $fqcn): ?string
+    {
+        $shortName = str_contains($fqcn, '\\')
+            ? substr($fqcn, strrpos($fqcn, '\\') + 1)
+            : $fqcn;
+        $filename = $shortName.'.php';
+
+        foreach ($this->classSearchBases as $base) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($iterator as $file) {
+                if ($file->getFilename() === $filename) {
+                    return $file->getPathname();
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -212,12 +264,19 @@ class GraphBuilder
     ): Graph {
         if ($projectRoot !== '') {
             $this->psr4Map = $this->buildFullPsr4Map($projectRoot);
+            $this->classSearchBases = $this->projectStructure->discoverClassSearchBases($projectRoot);
+        } else {
+            $this->psr4Map = [];
+            $this->classSearchBases = [];
         }
         $this->classMetrics = [];
         $this->dbQueryMap = $dbQueryMap;
+        $this->lightMode = count($routes) >= self::LIGHT_MODE_ROUTE_THRESHOLD
+            || count($callChain) >= self::LIGHT_MODE_CALL_EDGE_THRESHOLD;
         $this->graph->setMeta([
             'project' => $projectName,
             'analyzedAt' => date('c'),
+            'lightMode' => $this->lightMode,
         ]);
 
         // ── 1. Routes, Controllers, Actions, Middlewares ──────────────────────
@@ -302,17 +361,19 @@ class GraphBuilder
         // ── 4. Fat-class pass ─────────────────────────────────────────────────
         // After all nodes are built, mark controllers/services as fat classes.
 
-        foreach ($this->classMetrics as $nodeId => $agg) {
-            if (! $this->graph->hasNode($nodeId)) {
-                continue;
-            }
-            if ($agg['totalLines'] > 300 || $agg['methodCount'] > 10) {
-                $node = $this->graph->getNode($nodeId);
-                if ($node !== null) {
-                    $this->graph->updateNodeData($nodeId, array_merge(
-                        $node->data,
-                        ['fatClass' => true, 'classMetrics' => $agg],
-                    ));
+        if (! $this->lightMode) {
+            foreach ($this->classMetrics as $nodeId => $agg) {
+                if (! $this->graph->hasNode($nodeId)) {
+                    continue;
+                }
+                if ($agg['totalLines'] > 300 || $agg['methodCount'] > 10) {
+                    $node = $this->graph->getNode($nodeId);
+                    if ($node !== null) {
+                        $this->graph->updateNodeData($nodeId, array_merge(
+                            $node->data,
+                            ['fatClass' => true, 'classMetrics' => $agg],
+                        ));
+                    }
                 }
             }
         }
@@ -336,7 +397,9 @@ class GraphBuilder
             case 'model':
                 $short = class_basename($fqcn);
                 $file = isset($models[$fqcn]) ? $models[$fqcn]->file : $this->resolveFile($fqcn);
-                $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                $flowSteps = $this->canCollectDeepFlow() && $method !== ''
+                    ? $this->extractMethodFlowSteps($fqcn, $method)
+                    : [];
                 $this->graph->addNode(new Node($id, 'model', $method ? "{$short}::{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
@@ -350,7 +413,9 @@ class GraphBuilder
             case 'job':
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
-                $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                $flowSteps = $this->canCollectDeepFlow() && $method !== ''
+                    ? $this->extractMethodFlowSteps($fqcn, $method)
+                    : [];
                 $this->graph->addNode(new Node($id, 'job', $method ? "{$short}@{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
@@ -364,7 +429,9 @@ class GraphBuilder
             case 'event':
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
-                $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                $flowSteps = $this->canCollectDeepFlow() && $method !== ''
+                    ? $this->extractMethodFlowSteps($fqcn, $method)
+                    : [];
                 $this->graph->addNode(new Node($id, 'event', $method ? "{$short}@{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
@@ -378,15 +445,15 @@ class GraphBuilder
             case 'repository':
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
-                $flowSteps = $this->extractMethodFlowSteps($fqcn, $method);
-                $repoMetrics = $this->extractMethodMetrics($fqcn, $method);
+                $flowSteps = $this->canCollectDeepFlow() ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                $repoMetrics = $this->canCollectDeepFlow() ? $this->extractMethodMetrics($fqcn, $method) : [];
                 $this->graph->addNode(new Node($id, 'service', "{$short}@{$method}", [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'subtype' => 'repository',
                     'file' => $file,
                     'flowSteps' => $flowSteps,
-                    'visibility' => $this->extractVisibility($fqcn, $method),
+                    'visibility' => $this->canCollectDeepFlow() ? $this->extractVisibility($fqcn, $method) : 'public',
                     ...($repoMetrics ? ['metrics' => $repoMetrics] : []),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
                     ...($this->isFatMethod($repoMetrics) ? ['fatMethod' => true] : []),
@@ -396,15 +463,15 @@ class GraphBuilder
             default: // service
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
-                $flowSteps = $this->extractMethodFlowSteps($fqcn, $method);
-                $svcMetrics = $this->extractMethodMetrics($fqcn, $method);
+                $flowSteps = $this->canCollectDeepFlow() ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                $svcMetrics = $this->canCollectDeepFlow() ? $this->extractMethodMetrics($fqcn, $method) : [];
                 $this->graph->addNode(new Node($id, 'service', "{$short}@{$method}", [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'subtype' => 'service',
                     'file' => $file,
                     'flowSteps' => $flowSteps,
-                    'visibility' => $this->extractVisibility($fqcn, $method),
+                    'visibility' => $this->canCollectDeepFlow() ? $this->extractVisibility($fqcn, $method) : 'public',
                     ...($svcMetrics ? ['metrics' => $svcMetrics] : []),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
                     ...($this->isFatMethod($svcMetrics) ? ['fatMethod' => true] : []),
@@ -519,7 +586,9 @@ class GraphBuilder
             foreach ($def->methods as $methodDef) {
                 if ($methodDef->name === $action && $methodDef->ast !== null) {
                     $flowSteps = $this->flowExtractor->extract($methodDef->ast, $def->useMap);
-                    $metrics = $this->flowExtractor->metrics($methodDef->ast);
+                    if (! $this->lightMode) {
+                        $metrics = $this->flowExtractor->metrics($methodDef->ast);
+                    }
                     break;
                 }
             }
@@ -741,8 +810,10 @@ class GraphBuilder
             $hasN1 = false;
 
             if ($cmd->class) {
-                $flowSteps = $this->extractMethodFlowSteps($cmd->class, 'handle');
-                $metrics = $this->extractMethodMetrics($cmd->class, 'handle');
+                if ($this->canCollectDeepFlow()) {
+                    $flowSteps = $this->extractMethodFlowSteps($cmd->class, 'handle');
+                    $metrics = $this->extractMethodMetrics($cmd->class, 'handle');
+                }
                 $hasN1 = $this->hasN1InSteps($flowSteps);
                 $classToCmdId[$cmd->class] = $id;
             }
@@ -819,9 +890,11 @@ class GraphBuilder
 
             if ($ch->class) {
                 // Try __invoke first (class-based channels), then join() as fallback
-                $flowSteps = $this->extractMethodFlowSteps($ch->class, '__invoke');
-                if (empty($flowSteps)) {
-                    $flowSteps = $this->extractMethodFlowSteps($ch->class, 'join');
+                if ($this->canCollectDeepFlow()) {
+                    $flowSteps = $this->extractMethodFlowSteps($ch->class, '__invoke');
+                    if (empty($flowSteps)) {
+                        $flowSteps = $this->extractMethodFlowSteps($ch->class, 'join');
+                    }
                 }
                 $classToChannelId[$ch->class] = $id;
             }
@@ -883,6 +956,11 @@ class GraphBuilder
     private function eventId(string $fqcn): string
     {
         return "event::{$fqcn}";
+    }
+
+    private function canCollectDeepFlow(): bool
+    {
+        return ! $this->lightMode;
     }
 }
 

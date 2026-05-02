@@ -1,0 +1,9 @@
+{
+    "name": "test/monorepo",
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}
+

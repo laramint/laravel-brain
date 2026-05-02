@@ -1,0 +1,8 @@
+{
+    "name": "test/monorepo-shared",
+    "autoload": {
+        "psr-4": {
+            "Shared\\": "src/"
+        }
+    }
+}

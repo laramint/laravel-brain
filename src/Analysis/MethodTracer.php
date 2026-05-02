@@ -57,11 +57,17 @@ class MethodTracer
 
     private array $psr4Map = [];
 
+    /** @var string[] */
+    private array $classSearchBases = [];
+
+    private ProjectStructure $projectStructure;
+
     private string $projectRoot = '';
 
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -72,8 +78,12 @@ class MethodTracer
      */
     public function traceMethod(string $fqcn, string $method, array $psr4Map = [], string $projectRoot = ''): array
     {
-        $this->psr4Map = $psr4Map;
+        $discoveredPsr4Map = $projectRoot !== '' ? $this->projectStructure->buildPsr4Map($projectRoot) : [];
+        $this->psr4Map = $psr4Map + $discoveredPsr4Map;
         $this->projectRoot = $projectRoot;
+        $this->classSearchBases = $projectRoot !== ''
+            ? $this->projectStructure->discoverClassSearchBases($projectRoot)
+            : [];
         $this->visited = [];
         // Keep classCache across calls for efficiency when tracing many classes
 
@@ -88,8 +98,12 @@ class MethodTracer
      */
     public function trace(array $controllers, array $psr4Map = [], string $projectRoot = ''): array
     {
-        $this->psr4Map = $psr4Map;
+        $discoveredPsr4Map = $projectRoot !== '' ? $this->projectStructure->buildPsr4Map($projectRoot) : [];
+        $this->psr4Map = $psr4Map + $discoveredPsr4Map;
         $this->projectRoot = $projectRoot;
+        $this->classSearchBases = $projectRoot !== ''
+            ? $this->projectStructure->discoverClassSearchBases($projectRoot)
+            : [];
         $this->visited = [];
         $this->classCache = [];
 
@@ -598,22 +612,24 @@ class MethodTracer
         foreach ($this->psr4Map as $namespace => $basePath) {
             if (str_starts_with($fqcn, $namespace.'\\')) {
                 $relative = substr($fqcn, strlen($namespace) + 1);
-
-                return $basePath.'/'.str_replace('\\', '/', $relative).'.php';
+                $path = $basePath.'/'.str_replace('\\', '/', $relative).'.php';
+                if (file_exists($path)) {
+                    return $path;
+                }
             }
         }
 
         // Fallback: try common locations using full relative path
         if ($this->projectRoot !== '') {
             $relative = str_replace('\\', '/', $fqcn).'.php';
-            foreach (['app/Http/Controllers/', 'app/', 'src/'] as $prefix) {
-                $path = $this->projectRoot.'/'.$prefix.$relative;
+            foreach ($this->classSearchBases as $base) {
+                $path = $base.'/'.$relative;
                 if (file_exists($path)) {
                     return $path;
                 }
             }
 
-            // Last resort: search by short class name inside app/ and src/
+            // Last resort: search by short class name inside discovered class roots
             return $this->searchByClassName($fqcn);
         }
 
@@ -628,12 +644,7 @@ class MethodTracer
 
         $filename = $shortName.'.php';
 
-        foreach (['app', 'src'] as $dir) {
-            $base = $this->projectRoot.'/'.$dir;
-            if (! is_dir($base)) {
-                continue;
-            }
-
+        foreach ($this->classSearchBases as $base) {
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
             );

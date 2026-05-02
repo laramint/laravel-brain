@@ -13,25 +13,43 @@ class MiddlewareAnalyzer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     public function analyze(string $projectRoot): MiddlewareRegistry
     {
-        $kernelPath = $projectRoot.'/app/Http/Kernel.php';
-        $bootstrapPath = $projectRoot.'/bootstrap/app.php';
+        $global = [];
+        $groups = [];
+        $aliases = [];
 
-        if (file_exists($kernelPath)) {
-            return $this->analyzeLaravel10($kernelPath);
+        foreach ($this->projectStructure->discoverRoots($projectRoot) as $root) {
+            $kernelPath = $root.'/app/Http/Kernel.php';
+            $bootstrapPath = $root.'/bootstrap/app.php';
+
+            $registry = null;
+            if (file_exists($kernelPath)) {
+                $registry = $this->analyzeLaravel10($kernelPath);
+            } elseif (file_exists($bootstrapPath)) {
+                $registry = $this->analyzeLaravel11($bootstrapPath);
+            }
+
+            if ($registry === null) {
+                continue;
+            }
+
+            $global = array_values(array_unique(array_merge($global, $registry->global)));
+            foreach ($registry->groups as $name => $members) {
+                $groups[$name] = array_values(array_unique(array_merge($groups[$name] ?? [], $members)));
+            }
+            $aliases = array_merge($aliases, $registry->aliases);
         }
 
-        if (file_exists($bootstrapPath)) {
-            return $this->analyzeLaravel11($bootstrapPath);
-        }
-
-        return new MiddlewareRegistry([], [], []);
+        return new MiddlewareRegistry($global, $groups, $aliases);
     }
 
     private function analyzeLaravel10(string $kernelPath): MiddlewareRegistry

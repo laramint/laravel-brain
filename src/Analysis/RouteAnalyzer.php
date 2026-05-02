@@ -30,9 +30,12 @@ class RouteAnalyzer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -57,23 +60,21 @@ class RouteAnalyzer
 
     private function findRouteFiles(string $projectRoot): array
     {
-        $routesDir = rtrim($projectRoot, '/').'/routes';
-        if (! is_dir($routesDir)) {
-            return [];
-        }
-
         $files = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($routesDir, \FilesystemIterator::SKIP_DOTS)
-        );
 
-        foreach ($iterator as $entry) {
-            if ($entry->isFile() && $entry->getExtension() === 'php') {
-                $files[] = $entry->getPathname();
+        foreach ($this->projectStructure->discoverRouteDirectories($projectRoot) as $routesDir) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($routesDir, \FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($iterator as $entry) {
+                if ($entry->isFile() && $entry->getExtension() === 'php') {
+                    $files[] = $entry->getPathname();
+                }
             }
         }
 
-        return $files;
+        return array_values(array_unique($files));
     }
 
     /**

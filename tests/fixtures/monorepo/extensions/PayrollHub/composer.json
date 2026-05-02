@@ -1,0 +1,8 @@
+{
+  "name": "tests/payroll-hub",
+  "autoload": {
+    "psr-4": {
+      "Extensions\\PayrollHub\\": "app/"
+    }
+  }
+}

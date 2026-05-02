@@ -22,9 +22,12 @@ class ChannelAnalyzer
 {
     private PhpFileParser $parser;
 
+    private ProjectStructure $projectStructure;
+
     public function __construct()
     {
         $this->parser = new PhpFileParser;
+        $this->projectStructure = new ProjectStructure;
     }
 
     /**
@@ -34,32 +37,29 @@ class ChannelAnalyzer
     {
         $channels = [];
 
-        $channelsDir = $projectRoot.'/routes';
-        if (! is_dir($channelsDir)) {
-            return [];
-        }
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($channelsDir, \FilesystemIterator::SKIP_DOTS)
-        );
-
-        foreach ($iterator as $entry) {
-            if (! $entry->isFile() || $entry->getExtension() !== 'php') {
-                continue;
-            }
-            if (! str_contains(strtolower($entry->getBasename()), 'channel')) {
-                continue;
-            }
-
-            $parsed = $this->parser->parse($entry->getPathname());
-            if (! $parsed || ! $parsed['ast']) {
-                continue;
-            }
-
-            $channels = array_merge(
-                $channels,
-                $this->extractChannels($parsed['ast'], $parsed['useMap'], $entry->getPathname())
+        foreach ($this->projectStructure->discoverRouteDirectories($projectRoot) as $channelsDir) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($channelsDir, \FilesystemIterator::SKIP_DOTS)
             );
+
+            foreach ($iterator as $entry) {
+                if (! $entry->isFile() || $entry->getExtension() !== 'php') {
+                    continue;
+                }
+                if (! str_contains(strtolower($entry->getBasename()), 'channel')) {
+                    continue;
+                }
+
+                $parsed = $this->parser->parse($entry->getPathname());
+                if (! $parsed || ! $parsed['ast']) {
+                    continue;
+                }
+
+                $channels = array_merge(
+                    $channels,
+                    $this->extractChannels($parsed['ast'], $parsed['useMap'], $entry->getPathname())
+                );
+            }
         }
 
         return $channels;
