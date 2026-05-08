@@ -178,8 +178,12 @@ export default function App() {
           }
 
           // Use uriPrefix (the Route::prefix() stack) to determine folder depth.
-          // Fall back to the first URI segment if uriPrefix is absent (old scan data).
-          const prefixPath = tab.uriPrefix ?? tab.label.replace(/^[A-Z]+\s+/, '').split('/').filter(Boolean)[0] ?? ''
+          // If uriPrefix is '/' (no prefix stacking) or absent (old scan data),
+          // fall back to the first URI segment so routes are still grouped visually.
+          const uriPrefix = tab.uriPrefix ?? ''
+          const prefixPath = (uriPrefix === '' || uriPrefix === '/')
+            ? tab.label.replace(/^[A-Z]+\s+/, '').split('/').filter(Boolean)[0] ?? ''
+            : uriPrefix
           const segments = prefixPath.split('/').filter(Boolean)
 
           if (segments.length === 0) {

@@ -170,6 +170,28 @@ it('captures uriPrefix from nested Route::prefix() groups', function () use ($fi
     expect($settings)->not->toBeNull()->and($settings->uriPrefix)->toBe('/api/v1/admin');
 });
 
+it('routes without Route::prefix() stacking share the same uriPrefix so the frontend groups them together', function () use ($fixtureProject) {
+    $routes = (new RouteAnalyzer)->analyze($fixtureProject);
+
+    // /blogs, /blogs/{id}, and POST /blogs are defined without any Route::prefix() wrapper.
+    // They all get uriPrefix '/', which tells the frontend to fall back to the first URI
+    // segment ("/blogs") for visual grouping — so all three land in the same sidebar folder.
+    $profileGet  = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'GET');
+    $profilePost = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'POST');
+    $profileDelete = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'DELETE');
+
+    expect($profileGet)->not->toBeNull();
+    expect($profilePost)->not->toBeNull();
+    expect($profileDelete)->not->toBeNull();
+
+    expect($profileGet->uriPrefix)->toBe('/');
+    expect($profilePost->uriPrefix)->toBe('/');
+    expect($profileDelete->uriPrefix)->toBe('/');
+
+    // All three share the same uriPrefix — the frontend will group them together.
+    expect($profileGet->uriPrefix)->toBe($profilePost->uriPrefix)->toBe($profileDelete->uriPrefix);
+});
+
 it('parses Route::livewire() as a GET route with component as controller', function () {
     $tmp = sys_get_temp_dir().'/lb-route-analyzer-'.uniqid('', true);
     mkdir($tmp.'/routes/web', 0777, true);
