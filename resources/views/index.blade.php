@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Laravel Brain — Laravel Lifecycle Visualizer</title>
     <link rel="icon" type="image/png" href="/_laravel-brain/logo.png" />
-    <script type="module" crossorigin src="/_laravel-brain/assets/index-CqbbwlkO.js"></script>
+    <script type="module" crossorigin src="/_laravel-brain/assets/index-DpRWb6Hx.js"></script>
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/rolldown-runtime-CkqCuyE9.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-B5MdJxr-.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-react-emvhMHcg.js">

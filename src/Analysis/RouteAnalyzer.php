@@ -24,6 +24,8 @@ class RouteDefinition
         public string $tabGroup = 'default',
         /** @var Node\Expr\Closure|Node\Expr\ArrowFunction|null Inline closure AST for closure routes */
         public ?Node $closureNode = null,
+        /** The URI portion that came from Route::prefix() stacking (e.g. "/admin/auth") */
+        public string $uriPrefix = '',
     ) {}
 }
 
@@ -315,6 +317,12 @@ class RouteAnalyzer
 
                 $fullUri = implode('', $this->prefixStack).$chainPrefix.'/'.ltrim($uri, '/');
                 $fullUri = '/'.ltrim($fullUri, '/');
+                $fullUri = rtrim($fullUri, '/') ?: '/';
+
+                // Record the prefix portion (from Route::prefix() stacking + any chain prefix).
+                // This tells the UI exactly how deep the Route::prefix() nesting goes,
+                // so it only creates sidebar folders for prefix-derived segments.
+                $uriPrefix = '/'.ltrim(implode('', $this->prefixStack).$chainPrefix, '/');
 
                 $middlewares = array_merge(
                     array_merge(...$this->middlewareStack ?: [[]]),
@@ -333,6 +341,7 @@ class RouteAnalyzer
                     line: $node->getStartLine(),
                     tabGroup: strtoupper($method).' '.$fullUri,
                     closureNode: $closureNode,
+                    uriPrefix: $uriPrefix,
                 );
             }
 
@@ -366,6 +375,7 @@ class RouteAnalyzer
 
                 $fullUri = implode('', $this->prefixStack).$chainPrefix.'/'.ltrim($uri, '/');
                 $fullUri = '/'.ltrim($fullUri, '/');
+                $uriPrefix = '/'.ltrim(implode('', $this->prefixStack).$chainPrefix, '/');
 
                 $middlewares = array_merge(
                     array_merge(...$this->middlewareStack ?: [[]]),
@@ -382,6 +392,7 @@ class RouteAnalyzer
                     file: $this->file,
                     line: $node->getStartLine(),
                     tabGroup: 'GET '.$fullUri,
+                    uriPrefix: $uriPrefix,
                 );
             }
 
@@ -463,8 +474,10 @@ class RouteAnalyzer
                         $controllerFqcn = rtrim($namespace, '\\').'\\'.ltrim($controllerFqcn, '\\');
                     }
                 }
+
                 $fullUri = implode('', $this->prefixStack).$chainPrefix.'/'.ltrim($uri, '/');
                 $fullUri = '/'.ltrim($fullUri, '/');
+                $uriPrefix = '/'.ltrim(implode('', $this->prefixStack).$chainPrefix, '/');
                 $middlewares = array_merge(
                     array_merge(...$this->middlewareStack ?: [[]]),
                     $chainMiddlewares
@@ -488,6 +501,7 @@ class RouteAnalyzer
                         file: $this->file,
                         line: $node->getStartLine(),
                         tabGroup: $httpMethod.' '.$routeUri,
+                        uriPrefix: $uriPrefix,
                     );
                 }
             }

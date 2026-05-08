@@ -11,11 +11,13 @@ const DEFAULT_WIDTH = 240
 interface PrefixGroup {
   prefix: string
   tabs: TabEntry[]
+  subGroups: PrefixGroup[]
 }
 
 interface FileGroup {
   fileName: string
   prefixGroups: PrefixGroup[]
+  flatTabs: TabEntry[]
 }
 
 interface Props {
@@ -70,6 +72,86 @@ function RouteItem({ tab, isActive, isLoading, onSelect }: {
         {isLoading && <span className="left-nav-badge">…</span>}
       </button>
     </Tooltip>
+  )
+}
+
+function countTabsInGroup(group: PrefixGroup): number {
+  return group.tabs.length + group.subGroups.reduce((s, sg) => s + countTabsInGroup(sg), 0)
+}
+
+function filterGroup(group: PrefixGroup, q: string): PrefixGroup | null {
+  const tabs = group.tabs.filter((t) => t.label.toLowerCase().includes(q))
+  const subGroups = group.subGroups
+    .map((sg) => filterGroup(sg, q))
+    .filter((sg): sg is PrefixGroup => sg !== null)
+  if (tabs.length === 0 && subGroups.length === 0) return null
+  return { ...group, tabs, subGroups }
+}
+
+function PrefixGroupItem({ group, depth, prefixKey, activeId, loadingId, onSelect, expandedPrefixes, togglePrefix }: {
+  group: PrefixGroup
+  depth: number
+  prefixKey: string
+  activeId: string | null
+  loadingId: string | null
+  onSelect: (tab: TabEntry) => void
+  expandedPrefixes: Set<string>
+  togglePrefix: (key: string) => void
+}) {
+  const isOpen = expandedPrefixes.has(prefixKey)
+  const totalCount = countTabsInGroup(group)
+  const iconSize = depth === 0 ? 14 : 12
+
+  return (
+    <div
+      className="left-nav-prefix-group"
+      style={depth > 0 ? { marginLeft: `${depth * 12}px` } : undefined}
+    >
+      <Tooltip content={`URL segment /${group.prefix} — routes that share this path prefix.`}>
+        <button
+          type="button"
+          className="left-nav-prefix-header"
+          style={depth > 0 ? { fontSize: '10.5px', opacity: 0.85 } : undefined}
+          onClick={() => togglePrefix(prefixKey)}
+        >
+          <span className="left-nav-prefix-chevron">{isOpen ? '▾' : '▸'}</span>
+          <span className="left-nav-prefix-icon">
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </span>
+          <span className="left-nav-prefix-name">/{group.prefix}</span>
+          <span className="left-nav-prefix-count">{totalCount}</span>
+        </button>
+      </Tooltip>
+
+      {isOpen && (
+        <>
+          {group.tabs.map((tab) => (
+            <RouteItem
+              key={tab.id}
+              tab={tab}
+              isActive={tab.id === activeId}
+              isLoading={tab.id === loadingId}
+              onSelect={onSelect}
+            />
+          ))}
+          {group.subGroups.map((sg) => (
+            <PrefixGroupItem
+              key={sg.prefix}
+              group={sg}
+              depth={depth + 1}
+              prefixKey={`${prefixKey}::${sg.prefix}`}
+              activeId={activeId}
+              loadingId={loadingId}
+              onSelect={onSelect}
+              expandedPrefixes={expandedPrefixes}
+              togglePrefix={togglePrefix}
+            />
+          ))}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -167,11 +249,12 @@ export function LeftSidebar({
     return fileGroups
       .map((fg) => ({
         ...fg,
+        flatTabs: fg.flatTabs.filter((t) => t.label.toLowerCase().includes(q)),
         prefixGroups: fg.prefixGroups
-          .map((pg) => ({ ...pg, tabs: pg.tabs.filter((t) => t.label.toLowerCase().includes(q)) }))
-          .filter((pg) => pg.tabs.length > 0),
+          .map((pg) => filterGroup(pg, q))
+          .filter((pg): pg is PrefixGroup => pg !== null),
       }))
-      .filter((fg) => fg.prefixGroups.length > 0)
+      .filter((fg) => fg.prefixGroups.length > 0 || fg.flatTabs.length > 0)
   }, [fileGroups, search])
 
   return (
@@ -231,7 +314,10 @@ export function LeftSidebar({
         <div className="left-nav">
           {filteredFileGroups.map((fg) => {
             const fileOpen = expandedFiles.has(fg.fileName)
-            const totalRoutes = fg.prefixGroups.reduce((s, pg) => s + pg.tabs.length, 0)
+            const totalRoutes =
+              fg.flatTabs.length +
+              fg.prefixGroups.reduce((s, pg) => s + countTabsInGroup(pg), 0)
+
             return (
               <div key={fg.fileName} className="left-nav-file-group">
                 <Tooltip content={`Route definitions from ${fg.fileName}. Expand to see URI groups and endpoints.`}>
@@ -252,10 +338,9 @@ export function LeftSidebar({
                   </button>
                 </Tooltip>
 
-                {fileOpen && fg.prefixGroups.map((pg) => {
-                  // '_flat' = non-HTTP tabs (commands/channels): no prefix wrapper
-                  if (pg.prefix === '_flat') {
-                    return pg.tabs.map((tab) => (
+                {fileOpen && (
+                  <>
+                    {fg.flatTabs.map((tab) => (
                       <RouteItem
                         key={tab.id}
                         tab={tab}
@@ -263,43 +348,22 @@ export function LeftSidebar({
                         isLoading={tab.id === loadingId}
                         onSelect={onSelect}
                       />
-                    ))
-                  }
-
-                  const prefixKey = `${fg.fileName}::${pg.prefix}`
-                  const prefixOpen = expandedPrefixes.has(prefixKey)
-
-                  return (
-                    <div key={pg.prefix} className="left-nav-prefix-group">
-                      <Tooltip content={`URL segment /${pg.prefix} — routes that share this path prefix.`}>
-                        <button
-                          type="button"
-                          className="left-nav-prefix-header"
-                          onClick={() => togglePrefix(prefixKey)}
-                        >
-                          <span className="left-nav-prefix-chevron">{prefixOpen ? '▾' : '▸'}</span>
-                          <span className="left-nav-prefix-icon">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                            </svg>
-                          </span>
-                          <span className="left-nav-prefix-name">/{pg.prefix}</span>
-                          <span className="left-nav-prefix-count">{pg.tabs.length}</span>
-                        </button>
-                      </Tooltip>
-
-                      {prefixOpen && pg.tabs.map((tab) => (
-                        <RouteItem
-                          key={tab.id}
-                          tab={tab}
-                          isActive={tab.id === activeId}
-                          isLoading={tab.id === loadingId}
-                          onSelect={onSelect}
-                        />
-                      ))}
-                    </div>
-                  )
-                })}
+                    ))}
+                    {fg.prefixGroups.map((pg) => (
+                      <PrefixGroupItem
+                        key={pg.prefix}
+                        group={pg}
+                        depth={0}
+                        prefixKey={`${fg.fileName}::${pg.prefix}`}
+                        activeId={activeId}
+                        loadingId={loadingId}
+                        onSelect={onSelect}
+                        expandedPrefixes={expandedPrefixes}
+                        togglePrefix={togglePrefix}
+                      />
+                    ))}
+                  </>
+                )}
               </div>
             )
           })}

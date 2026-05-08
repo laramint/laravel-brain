@@ -82,6 +82,7 @@ export interface TabEntry {
   routeFile?: string
   category?: string
   panelId?: string
+  uriPrefix?: string
 }
 
 export interface Manifest {

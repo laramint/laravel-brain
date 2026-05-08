@@ -67,9 +67,9 @@ it('applies prefix from nested group', function () use ($fixtureProject) {
     expect($adminRoute->middlewares)->toContain('role:admin');
 });
 
-it('finds 13 routes total', function () use ($fixtureProject) {
+it('finds 18 routes total', function () use ($fixtureProject) {
     $routes = (new RouteAnalyzer)->analyze($fixtureProject);
-    expect(count($routes))->toBe(13);
+    expect(count($routes))->toBe(18);
 });
 
 it('captures middleware chained after the HTTP method call', function () use ($fixtureProject) {
@@ -149,6 +149,25 @@ PHP
     } finally {
         routeAnalyzerTestDeleteTree($tmp);
     }
+});
+
+it('captures uriPrefix from nested Route::prefix() groups', function () use ($fixtureProject) {
+    $routes = (new RouteAnalyzer)->analyze($fixtureProject);
+
+    $health = findRoute($routes, fn ($r) => $r->uri === '/health');
+    expect($health)->not->toBeNull()->and($health->uriPrefix)->toBe('/');
+
+    $status = findRoute($routes, fn ($r) => $r->uri === '/api/status');
+    expect($status)->not->toBeNull()->and($status->uriPrefix)->toBe('/api');
+
+    $users = findRoute($routes, fn ($r) => $r->uri === '/api/v1/users');
+    expect($users)->not->toBeNull()->and($users->uriPrefix)->toBe('/api/v1/users');
+
+    $users = findRoute($routes, fn ($r) => $r->uri === '/api/v1/users/{id}');
+    expect($users)->not->toBeNull()->and($users->uriPrefix)->toBe('/api/v1/users');
+
+    $settings = findRoute($routes, fn ($r) => $r->uri === '/api/v1/admin/settings');
+    expect($settings)->not->toBeNull()->and($settings->uriPrefix)->toBe('/api/v1/admin');
 });
 
 it('parses Route::livewire() as a GET route with component as controller', function () {

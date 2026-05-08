@@ -24,6 +24,7 @@ class TabManifestEntry
         public string $routeFile = '',
         public string $category = 'Route',
         public string $panelId = '',
+        public string $uriPrefix = '',
     ) {}
 }
 
@@ -100,6 +101,7 @@ class GraphSplitter
                 edgeCount: $subgraph->edgeCount(),
                 file: ".graph-{$tabId}.json",
                 routeFile: $this->relativeRouteFile($tabRoutes[0]->file),
+                uriPrefix: $tabRoutes[0]->uriPrefix,
             );
 
             // Help GC between large splits
@@ -277,6 +279,7 @@ class GraphSplitter
                 'file' => $entry->file,
                 'routeFile' => $entry->routeFile,
                 'category' => $entry->category,
+                'uriPrefix' => $entry->uriPrefix,
             ];
             if ($entry->panelId !== '') {
                 $tab['panelId'] = $entry->panelId;

@@ -1,15 +1,15 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react'
-import type { GraphViewportRef } from './types/graph'
 import { useManifest } from './hooks/useManifest'
 import { useTabGraph } from './hooks/useTabGraph'
 import { useVirtualGraph } from './hooks/useVirtualGraph'
 import { useTheme } from './hooks/useTheme'
 import { GraphView } from './components/GraphView'
+import { LARGE_GRAPH_THRESHOLD } from './utils/graphConstants'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { LeftSidebar } from './components/LeftSidebar'
-import type { GraphNode, TabEntry } from './types/graph'
 import { Tooltip } from './components/Tooltip'
+import type { GraphNode, TabEntry, GraphViewportRef } from './types/graph'
 import './App.css'
 
 const ALL_TYPES: GraphNode['type'][] = [
@@ -40,7 +40,7 @@ export default function App() {
 
   const handleSelectTab = useCallback((tab: TabEntry) => {
     if (activeTab?.id === tab.id) return
-    
+
     // Update URL if different
     const url = new URL(window.location.href)
     if (url.searchParams.get('tab') !== tab.id) {
@@ -49,6 +49,7 @@ export default function App() {
     }
 
     setActiveTab(tab)
+    setLoadingTabId(tab.id)
     setSearchQuery('')
     load(tab.file)
   }, [activeTab, load])
@@ -72,7 +73,13 @@ export default function App() {
   if (tabState.data !== prevTabData) {
     setPrevTabData(tabState.data)
     if (tabState.data) {
-      setVisibleTypes(new Set(ALL_TYPES))
+      const nodeCount = tabState.data.nodes.length
+      const nextVisible = new Set(
+        nodeCount > LARGE_GRAPH_THRESHOLD
+          ? ALL_TYPES.filter((t) => t !== 'middleware')
+          : ALL_TYPES
+      )
+      setVisibleTypes(nextVisible)
     }
     setSelectedId(null)
   }
@@ -137,41 +144,65 @@ export default function App() {
       byFile.set(key, list)
     })
 
-    // Within each file, group by first URI path segment.
-    // HTTP tabs (GET /api/users) → group by first path segment (/api).
-    // Non-HTTP tabs (commands, channels) have no slash structure → flat list under '_'.
+    // Build a recursive trie using only the Route::prefix() segments (tab.uriPrefix).
+    // The route tab lands at the deepest prefix node as a leaf — deeper URI segments
+    // (e.g. /{id}/gallery) are NOT turned into folders because they're not prefix groups.
+    // Non-HTTP tabs (commands, channels) go into flatTabs (no prefix wrapper).
     const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'ANY'])
+
+    interface NodeData { tabs: TabEntry[]; children: Map<string, NodeData> }
+    type PGNode = { prefix: string; tabs: TabEntry[]; subGroups: PGNode[] }
+
+    function toGroups(nodeMap: Map<string, NodeData>): PGNode[] {
+      return [...nodeMap.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([prefix, data]) => ({
+          prefix,
+          tabs: data.tabs,
+          subGroups: toGroups(data.children),
+        }))
+    }
 
     const fileGroups = [...byFile.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([fileName, tabs]) => {
-        const byPrefix = new Map<string, TabEntry[]>()
+        const flatTabs: TabEntry[] = []
+        const root = new Map<string, NodeData>()
+
         tabs.forEach((tab) => {
           const firstWord = tab.label.split(' ')[0]
-          const isHttp = HTTP_METHODS.has(firstWord)
-          let prefix: string
-          if (isHttp) {
-            const uri = tab.label.replace(/^[A-Z]+\s+/, '')
-            const segments = uri.split('/').filter(Boolean)
-            // Filament routes: group by the FIRST URL segment (the resource domain, e.g.
-            // "shop" from "/shop/products", "hr" from "/hr/employees").  Because resources
-            // are already scoped to their panel group (file group), this gives a clean
-            // second-level grouping: Admin Panel → shop → products/orders/…
-            // Regular routes: group by first path segment (e.g. "api" from "/api/users").
-            prefix = segments[0] ?? '/'
-          } else {
-            // Commands/channels: group by the part before the first colon or slash,
-            // or use '_flat' sentinel to render them without a prefix wrapper.
-            prefix = '_flat'
+
+          if (!HTTP_METHODS.has(firstWord)) {
+            flatTabs.push(tab)
+            return
           }
-          const list = byPrefix.get(prefix) ?? []
-          list.push(tab)
-          byPrefix.set(prefix, list)
+
+          // Use uriPrefix (the Route::prefix() stack) to determine folder depth.
+          // Fall back to the first URI segment if uriPrefix is absent (old scan data).
+          const prefixPath = tab.uriPrefix ?? tab.label.replace(/^[A-Z]+\s+/, '').split('/').filter(Boolean)[0] ?? ''
+          const segments = prefixPath.split('/').filter(Boolean)
+
+          if (segments.length === 0) {
+            flatTabs.push(tab)
+            return
+          }
+
+          let map = root
+
+          for (let i = 0; i < segments.length; i++) {
+            const seg = segments[i]
+
+            if (!map.has(seg)) map.set(seg, { tabs: [], children: new Map() })
+
+            if (i === segments.length - 1) {
+              map.get(seg)!.tabs.push(tab)
+            } else {
+              map = map.get(seg)!.children
+            }
+          }
         })
-        const prefixGroups = [...byPrefix.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([prefix, tabs]) => ({ prefix, tabs }))
-        return { fileName, prefixGroups }
+
+        return { fileName, prefixGroups: toGroups(root), flatTabs }
       })
 
     return { fileGroups }
