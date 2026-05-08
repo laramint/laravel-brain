@@ -176,7 +176,7 @@ it('routes without Route::prefix() stacking share the same uriPrefix so the fron
     // /blogs, /blogs/{id}, and POST /blogs are defined without any Route::prefix() wrapper.
     // They all get uriPrefix '/', which tells the frontend to fall back to the first URI
     // segment ("/blogs") for visual grouping — so all three land in the same sidebar folder.
-    $profileGet  = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'GET');
+    $profileGet = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'GET');
     $profilePost = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'POST');
     $profileDelete = findRoute($routes, fn ($r) => $r->uri === '/profile' && $r->method === 'DELETE');
 
