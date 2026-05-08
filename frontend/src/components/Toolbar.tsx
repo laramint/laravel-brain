@@ -24,6 +24,8 @@ interface Props {
   graphRef: React.MutableRefObject<GraphViewportRef | null>
   complexityOverlay: boolean
   onToggleComplexityOverlay: () => void
+  compact: boolean
+  onToggleCompact: () => void
 }
 
 function formatAge(ms: number): string {
@@ -91,7 +93,7 @@ function ActionDropdown({ label, icon, children, buttonTitle }: { label: string,
   )
 }
 
-export function Toolbar({ layout, rankDir, onRankDirChange, nodeCount, edgeCount, visibleCount, activeTabLabel, graphData, analyzedAt, theme, onLayoutChange, onSearch, onToggleTheme, graphRef, complexityOverlay, onToggleComplexityOverlay }: Props) {
+export function Toolbar({ layout, rankDir, onRankDirChange, nodeCount, edgeCount, visibleCount, activeTabLabel, graphData, analyzedAt, theme, onLayoutChange, onSearch, onToggleTheme, graphRef, complexityOverlay, onToggleComplexityOverlay, compact, onToggleCompact }: Props) {
   const [searchValue, setSearchValue] = useState('')
   const [showMermaid, setShowMermaid] = useState(false)
   const [showAiRules, setShowAiRules] = useState(false)
@@ -259,7 +261,7 @@ export function Toolbar({ layout, rankDir, onRankDirChange, nodeCount, edgeCount
             </ActionDropdown>
           </div>
  
-          {/* Group 2: Complexity overlay toggle */}
+          {/* Group 2: Complexity overlay toggle + Compact toggle */}
           <div className="toolbar-group">
             <Tooltip content="Cyclomatic complexity: number of independent paths through code (branches, loops). Higher values often mean harder-to-test methods. Colors nodes by this metric when enabled.">
               <button
@@ -268,6 +270,15 @@ export function Toolbar({ layout, rankDir, onRankDirChange, nodeCount, edgeCount
                 onClick={onToggleComplexityOverlay}
               >
                 <span>◈</span> <span>Complexity</span>
+              </button>
+            </Tooltip>
+            <Tooltip content="Compact mode: shrink graph nodes to show only the class name, reducing visual clutter on large graphs.">
+              <button
+                type="button"
+                className={`toolbar-btn ${compact ? 'toolbar-btn--active' : ''}`}
+                onClick={onToggleCompact}
+              >
+                <span>⊟</span> <span>Compact</span>
               </button>
             </Tooltip>
           </div>

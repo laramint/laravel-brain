@@ -51,15 +51,20 @@ export function splitNodeLabel(label: string, dataMethod?: string): { className:
 
 /** Card-style node dimensions (fixed height, width based on longest visible text). */
 export const CARD_H = 90
+export const COMPACT_CARD_H = 40
 export const CARD_W_MIN = 185
 export const CARD_W_MAX = 270
+export const COMPACT_CARD_W_MIN = 120
 
-export function buildLayoutNode(d: GraphElement['data']): LayoutNode {
+export function buildLayoutNode(d: GraphElement['data'], compact = false): LayoutNode {
   const rawLabel = String(d.label ?? d.id)
   const { className, method } = splitNodeLabel(rawLabel, d.method as string | undefined)
-  const longestText = className.length > method.length ? className : method
-  const width = Math.max(CARD_W_MIN, Math.min(CARD_W_MAX, longestText.length * 7.6 + 44))
-  const height = CARD_H
+  const longestText = compact
+    ? className
+    : className.length > method.length ? className : method
+  const wMin = compact ? COMPACT_CARD_W_MIN : CARD_W_MIN
+  const width = Math.max(wMin, Math.min(CARD_W_MAX, longestText.length * 7.6 + 44))
+  const height = compact ? COMPACT_CARD_H : CARD_H
   return {
     id: d.id,
     x: 0,
@@ -260,7 +265,7 @@ export function pickLayoutKind(
   return 'dagre'
 }
 
-export function partitionElements(elements: GraphElement[]): {
+export function partitionElements(elements: GraphElement[], compact = false): {
   nodes: LayoutNode[]
   edges: LayoutEdge[]
 } {
@@ -276,7 +281,7 @@ export function partitionElements(elements: GraphElement[]): {
         data: d,
       })
     } else {
-      nodes.push(buildLayoutNode(d))
+      nodes.push(buildLayoutNode(d, compact))
     }
   }
   return { nodes, edges }

@@ -62,4 +62,29 @@ return [
         ],
     ],
 
+    // -------------------------------------------------------------------------
+    // Livewire Component Search Paths
+    // -------------------------------------------------------------------------
+    // Directories (relative to project root) that are searched when resolving
+    // a Livewire component defined as a namespace::dot.notation string in routes.
+    //
+    // Example route:
+    //   Route::livewire('create-password', 'pages::password.create')
+    //
+    // The namespace prefix ('pages') and dot path ('password.create') are each
+    // converted to StudlyCase and looked up in every directory listed here.
+    // For the example above, laravel-brain would search for:
+    //   {dir}/Pages/Password/Create.php   (prefix + path)
+    //   {dir}/Password/Create.php          (path only)
+    //
+    // Add any custom Livewire or page-component directories your project uses.
+    //
+    'livewire' => [
+        'component_paths' => [
+            'app/Http/Livewire',
+            'app/Livewire',
+            'app/View/Components',
+        ],
+    ],
+
 ];

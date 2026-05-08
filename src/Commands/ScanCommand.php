@@ -11,7 +11,8 @@ class ScanCommand extends Command
 {
     protected $signature = 'brain:scan
                             {--watch : Watch for PHP file changes and auto-rescan}
-                            {--interval=3 : Poll interval in seconds (watch mode only)}';
+                            {--interval=3 : Poll interval in seconds (watch mode only)}
+                            {--memory-limit=1024M : Increase memory limit for scanning. Example: 1024M}';
 
     protected $description = 'Analyze this Laravel project and open the interactive graph viewer';
 
@@ -20,7 +21,13 @@ class ScanCommand extends Command
 
     public function handle(): int
     {
-        ini_set('memory_limit', '1024M');
+        $memoryLimit = $this->normalizeMemoryLimit($this->option('memory-limit'));
+
+        if ($memoryLimit === self::FAILURE) {
+            return $memoryLimit;
+        }
+
+        ini_set('memory_limit', $memoryLimit);
 
         $projectPath = base_path();
 
@@ -114,6 +121,51 @@ class ScanCommand extends Command
         }
 
         return $label;
+    }
+
+    // ── Memory Option ─────────────────────────────────────────────────────────
+
+    private function normalizeMemoryLimit($option): string|int
+    {
+        $memory = strtoupper(trim((string) $option));
+
+        if ($memory === '-1') {
+            return -1;
+        }
+
+        if (! preg_match('/^(\d+)([KMGT]?)$/', $memory, $matches)) {
+            $this->error('Invalid memory limit format. Example: 1024M, 1G, 2G or -1.');
+
+            return self::FAILURE;
+        }
+
+        $value = (int) $matches[1];
+        $unit = $matches[2] ?: 'M';
+
+        if ($value <= 0) {
+            $this->error('Invalid memory limit. The value must be a positive number or -1.');
+
+            return self::FAILURE;
+        }
+
+        if ($this->convertToBytes($value, $unit) < (1024 ** 3)) {
+            $this->error("The memory limit must be at least 1024M (Current: {$value}{$unit}).");
+
+            return self::FAILURE;
+        }
+
+        return "{$value}{$unit}";
+    }
+
+    private function convertToBytes(int $value, string $unit): int
+    {
+        return match ($unit) {
+            'K' => $value * (1024 ** 1),
+            'M' => $value * (1024 ** 2),
+            'G' => $value * (1024 ** 3),
+            'T' => $value * (1024 ** 4),
+            default => $value,
+        };
     }
 
     // ── Shared scan logic ─────────────────────────────────────────────────────

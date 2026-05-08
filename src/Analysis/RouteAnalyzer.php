@@ -348,8 +348,11 @@ class RouteAnalyzer
             /**
              * Handles Route::livewire('/uri', ComponentClass::class) — a Livewire v2 macro
              * that registers a GET route pointing to a Livewire component.
+             *
+             * @param  string[]  $extraMiddlewares  Middleware collected from post-route chaining
+             *                                      (e.g. Route::livewire(...)->middleware('auth'))
              */
-            private function handleLivewireRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node): void
+            private function handleLivewireRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, array $extraMiddlewares = []): void
             {
                 $uri = $this->extractString($node->args[0] ?? null);
                 if ($uri === null) {
@@ -380,6 +383,7 @@ class RouteAnalyzer
                 $middlewares = array_merge(
                     array_merge(...$this->middlewareStack ?: [[]]),
                     $chainMiddlewares,
+                    $extraMiddlewares,
                 );
 
                 $this->routes[] = new RouteDefinition(
@@ -432,15 +436,23 @@ class RouteAnalyzer
                     $current = $current->var;
                 }
 
-                // Base of the chain is a StaticCall — Route::get('/brands', [...])
+                // Base of the chain is a StaticCall — Route::get('/brands', [...]) or Route::livewire(...)
                 if ($current instanceof Node\Expr\StaticCall) {
                     $class = $this->resolveClass($current->class);
                     $name = $current->name instanceof Node\Identifier ? $current->name->toString() : null;
 
-                    if ($class === 'Route' && $name !== null && in_array($name, self::HTTP_METHODS, true)) {
-                        $this->handleHttpRoute($current, $name, $postMiddlewares);
+                    if ($class === 'Route' && $name !== null) {
+                        if (in_array($name, self::HTTP_METHODS, true)) {
+                            $this->handleHttpRoute($current, $name, $postMiddlewares);
 
-                        return true;
+                            return true;
+                        }
+
+                        if ($name === 'livewire') {
+                            $this->handleLivewireRoute($current, $postMiddlewares);
+
+                            return true;
+                        }
                     }
                 }
 

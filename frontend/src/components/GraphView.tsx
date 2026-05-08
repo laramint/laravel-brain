@@ -16,7 +16,6 @@ import {
 import {
   type LayoutEdge,
   type LayoutNode,
-  CARD_H,
   centerNodes,
   layoutBreadthFirst,
   layoutCircle,
@@ -265,6 +264,7 @@ interface Props {
   stressTestNodeId?: string | null
   stressRunKey?: number
   complexityOverlay: boolean
+  compact?: boolean
 }
 
 export function GraphView({
@@ -279,13 +279,14 @@ export function GraphView({
   stressTestNodeId,
   stressRunKey,
   complexityOverlay,
+  compact = false,
 }: Props) {
   const dark = theme === 'dark'
   // Previous alphas (0.07 / 0.1) made edge strokes nearly invisible while marker tips still showed.
   const edgeLine = dark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.38)'
   const edgeArrow = dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'
 
-  const { nodes: baseNodes, edges: baseEdges } = useMemo(() => partitionElements(elements), [elements])
+  const { nodes: baseNodes, edges: baseEdges } = useMemo(() => partitionElements(elements, compact), [elements, compact])
 
   const visibleNodeCount = useMemo(
     () => baseNodes.filter((n) => visibleTypes.has(String(n.data.type))).length,
@@ -308,7 +309,7 @@ export function GraphView({
     return () => {
       if (layoutTimeout.current) window.clearTimeout(layoutTimeout.current)
     }
-  }, [visibleTypes, layout, rankDir])
+  }, [visibleTypes, layout, rankDir, compact])
 
   const { nodes, edges } = useMemo(() => {
     void layoutTick
@@ -1094,7 +1095,7 @@ export function GraphView({
             const methodDisplay = method && !method.includes('(') ? method + '()' : method
             const type = String(n.data.type ?? '')
             const w = n.width
-            const h = CARD_H
+            const h = n.height
             const hw = w / 2
             const hh = h / 2
 
@@ -1120,49 +1121,71 @@ export function GraphView({
                 {/* Glow ring when selected */}
                 {selected && (
                   <rect x={-hw - 3} y={-hh - 3} width={w + 6} height={h + 6}
-                    rx={13} fill="none" stroke={accent} strokeWidth={6} opacity={0.15} />
+                    rx={compact ? 7 : 13} fill="none" stroke={accent} strokeWidth={6} opacity={0.15} />
                 )}
 
                 {/* Card background */}
-                <rect x={-hw} y={-hh} width={w} height={h} rx={10}
+                <rect x={-hw} y={-hh} width={w} height={h} rx={compact ? 6 : 10}
                   fill={bg} stroke={border} strokeWidth={borderW}
                   filter={Boolean(n.data.hasN1) && !complexityOverlay
                     ? 'drop-shadow(0 0 8px rgba(244,67,54,0.4))' : undefined}
                 />
 
-                {/* Type dot */}
-                <circle cx={-hw + 14} cy={-hh + 18} r={4} fill={accent} />
+                {compact ? (
+                  <>
+                    {/* Compact: type dot + class name only, vertically centered */}
+                    <circle cx={-hw + 10} cy={0} r={3.5} fill={accent} />
+                    <text x={-hw + 20} y={0} fontSize={11} fontWeight={700}
+                      fontFamily="ui-sans-serif, system-ui, -apple-system, sans-serif"
+                      fill={labelColor} dominantBaseline="middle"
+                      style={{ pointerEvents: 'none' }}>
+                      {classDisplay}
+                    </text>
+                    {Boolean(n.data.hasN1) && (
+                      <text x={hw - 6} y={0} fontSize={9} textAnchor="end"
+                        fontFamily="ui-monospace, monospace" fill="#F44336"
+                        dominantBaseline="middle" style={{ pointerEvents: 'none' }}>
+                        N+1
+                      </text>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Type dot */}
+                    <circle cx={-hw + 14} cy={-hh + 18} r={4} fill={accent} />
 
-                {/* Type label */}
-                <text x={-hw + 24} y={-hh + 22} fontSize={10}
-                  fontFamily="ui-monospace, monospace" fill={accent} opacity={0.9}
-                  style={{ pointerEvents: 'none' }}>
-                  {type}
-                </text>
+                    {/* Type label */}
+                    <text x={-hw + 24} y={-hh + 22} fontSize={10}
+                      fontFamily="ui-monospace, monospace" fill={accent} opacity={0.9}
+                      style={{ pointerEvents: 'none' }}>
+                      {type}
+                    </text>
 
-                {/* N+1 badge */}
-                {Boolean(n.data.hasN1) && (
-                  <text x={hw - 10} y={-hh + 22} fontSize={10} textAnchor="end"
-                    fontFamily="ui-monospace, monospace" fill="#F44336"
-                    style={{ pointerEvents: 'none' }}>
-                    N+1
-                  </text>
-                )}
+                    {/* N+1 badge */}
+                    {Boolean(n.data.hasN1) && (
+                      <text x={hw - 10} y={-hh + 22} fontSize={10} textAnchor="end"
+                        fontFamily="ui-monospace, monospace" fill="#F44336"
+                        style={{ pointerEvents: 'none' }}>
+                        N+1
+                      </text>
+                    )}
 
-                {/* Class name */}
-                <text x={-hw + 14} y={-hh + 46} fontSize={13} fontWeight={700}
-                  fontFamily="ui-sans-serif, system-ui, -apple-system, sans-serif"
-                  fill={labelColor} style={{ pointerEvents: 'none' }}>
-                  {classDisplay}
-                </text>
+                    {/* Class name */}
+                    <text x={-hw + 14} y={-hh + 46} fontSize={13} fontWeight={700}
+                      fontFamily="ui-sans-serif, system-ui, -apple-system, sans-serif"
+                      fill={labelColor} style={{ pointerEvents: 'none' }}>
+                      {classDisplay}
+                    </text>
 
-                {/* Method */}
-                {methodTrimmed && (
-                  <text x={-hw + 14} y={-hh + 64} fontSize={11}
-                    fontFamily="ui-monospace, monospace" fill={mutedColor}
-                    style={{ pointerEvents: 'none' }}>
-                    ↻ {methodTrimmed}
-                  </text>
+                    {/* Method */}
+                    {methodTrimmed && (
+                      <text x={-hw + 14} y={-hh + 64} fontSize={11}
+                        fontFamily="ui-monospace, monospace" fill={mutedColor}
+                        style={{ pointerEvents: 'none' }}>
+                        ↻ {methodTrimmed}
+                      </text>
+                    )}
+                  </>
                 )}
 
 

@@ -76,6 +76,10 @@ class ProjectAnalyzer
         $this->filamentAnalyzer = new FilamentAnalyzer;
         $this->queryTracer = new QueryTracer;
         $this->graphBuilder = new GraphBuilder;
+        $livewirePaths = config('laravel-brain.livewire.component_paths', []);
+        if (is_array($livewirePaths) && $livewirePaths !== []) {
+            $this->graphBuilder->setLivewireComponentPaths($livewirePaths);
+        }
         $this->graphSplitter = new GraphSplitter;
 
         $this->onProgress = static function (string $event, array $data): void {

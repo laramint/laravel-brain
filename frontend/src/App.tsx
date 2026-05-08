@@ -243,6 +243,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [complexityOverlay, setComplexityOverlay] = useState(false)
   const [complexityFilter, setComplexityFilter] = useState<'all' | 'complex' | 'critical'>('all')
+  const [compact, setCompact] = useState(false)
 
   const handleScan = async () => {
     if (!window.confirm('This will scan the entire project. Proceed?')) return
@@ -330,6 +331,8 @@ export default function App() {
         graphRef={graphRef}
         complexityOverlay={complexityOverlay}
         onToggleComplexityOverlay={() => setComplexityOverlay(v => !v)}
+        compact={compact}
+        onToggleCompact={() => setCompact(v => !v)}
       />
       <div className="main">
         <LeftSidebar
@@ -402,6 +405,7 @@ export default function App() {
               stressTestNodeId={stressTestNodeId}
               stressRunKey={stressRunKey}
               complexityOverlay={complexityOverlay}
+              compact={compact}
             />
           )}
         </div>

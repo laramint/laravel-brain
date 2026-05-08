@@ -83,6 +83,21 @@ This analyzes your entire codebase and writes the graph data to `storage/app/lar
   Done! Open the viewer at: http://localhost:8000/_laravel-brain
 ```
 
+#### Memory limit
+
+The scanner defaults to **1024M**. On larger codebases you can raise the limit with `--memory-limit`:
+
+```bash
+php artisan brain:scan --memory-limit=1G
+php artisan brain:scan --memory-limit=2G
+php artisan brain:scan --memory-limit=2048M
+
+# Unlimited (use with caution)
+php artisan brain:scan --memory-limit=-1
+```
+
+Accepted formats: `<number>M` (megabytes), `<number>G` (gigabytes), or `-1` (unlimited). The minimum allowed value is `1024M`.
+
 ### Export AI context for a node
 
 Click the **🤖** button in the node sidebar to copy a structured Markdown context block to your clipboard, ready to paste into Claude, ChatGPT, or any LLM.

@@ -72,6 +72,13 @@ class GraphBuilder
 
     private string $projectRoot = '';
 
+    /** @var string[] Directories (relative to project root) searched for Livewire namespace::dot.notation components */
+    private array $livewireComponentPaths = [
+        'app/Http/Livewire',
+        'app/Livewire',
+        'app/View/Components',
+    ];
+
     private ?PhpStructureInspector $structureInspector = null;
 
     /** @var array<string, 'enum'|'interface'|'trait'|'abstract_class'|null> */
@@ -95,6 +102,14 @@ class GraphBuilder
         $this->graph = new Graph;
         $this->flowExtractor = new FlowExtractor;
         $this->parser = new PhpFileParser;
+    }
+
+    /** @param  string[]  $paths  Directories relative to project root */
+    public function setLivewireComponentPaths(array $paths): void
+    {
+        if ($paths !== []) {
+            $this->livewireComponentPaths = $paths;
+        }
     }
 
     /**
@@ -129,6 +144,11 @@ class GraphBuilder
      */
     private function resolveFile(string $fqcn): string
     {
+        // Livewire v2 namespace::dot.notation (e.g. 'pages::password.create')
+        if (str_contains($fqcn, '::') && ! str_contains($fqcn, '\\')) {
+            return $this->resolveLivewireStringComponent($fqcn);
+        }
+
         foreach ($this->psr4Map as $namespace => $basePath) {
             if (str_starts_with($fqcn, $namespace.'\\')) {
                 $relative = substr($fqcn, strlen($namespace) + 1);
@@ -181,6 +201,30 @@ class GraphBuilder
             foreach ($iterator as $file) {
                 if ($file->getFilename() === $filename) {
                     return $file->getPathname();
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Resolve a Livewire v2 namespace::dot.notation component string to a file path.
+     * E.g. 'pages::password.create' → app/Http/Livewire/Pages/Password/Create.php
+     */
+    private function resolveLivewireStringComponent(string $component): string
+    {
+        [$prefix, $dotPath] = explode('::', $component, 2);
+
+        $pathParts = array_map(fn ($p) => Str::studly($p), explode('.', $dotPath));
+        $relativePath = implode('/', $pathParts);
+        $prefixPath = Str::studly($prefix);
+
+        foreach ($this->livewireComponentPaths as $baseDir) {
+            foreach ([$prefixPath.'/'.$relativePath, $relativePath] as $sub) {
+                $path = $this->projectRoot.'/'.$baseDir.'/'.$sub.'.php';
+                if (file_exists($path)) {
+                    return $path;
                 }
             }
         }
