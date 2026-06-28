@@ -19,6 +19,14 @@ return [
     //
     'driver' => env('LARAVEL_BRAIN_DRIVER', 'file'),
 
+    // -------------------------------------------------------------------------
+    // Route Prefix
+    // -------------------------------------------------------------------------
+    // The URL prefix for all Laravel Brain routes.
+    // Override via the LARAVEL_BRAIN_ROUTE_PREFIX env variable.
+    //
+    'route_prefix' => env('LARAVEL_BRAIN_ROUTE_PREFIX', '_laravel-brain'),
+
     // Settings for the 'database' driver.
     //
     'database' => [
