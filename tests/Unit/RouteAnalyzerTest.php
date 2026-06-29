@@ -228,7 +228,8 @@ it('auto-discover mode always drops the package\'s own _laravel-brain routes', f
     $router = makeAutoDiscoverRouter();
 
     $router->get('/app-route', [UserController::class, 'show']);
-    $router->get('/_laravel-brain/api/source', [BrainController::class, 'source']);
+    $prefix = config('laravel-brain.route_prefix', '_laravel-brain');
+    $router->get("/{$prefix}/api/source", [BrainController::class, 'source']);
 
     try {
         // Even with excludeVendor disabled, brain's own routes must be skipped.
@@ -237,7 +238,7 @@ it('auto-discover mode always drops the package\'s own _laravel-brain routes', f
 
         $uris = array_map(fn ($r) => $r->uri, $routes);
         expect($uris)->toContain('/app-route')
-            ->and($uris)->not->toContain('/_laravel-brain/api/source');
+            ->and($uris)->not->toContain("/{$prefix}/api/source");
     } finally {
         Container::setInstance(null);
     }

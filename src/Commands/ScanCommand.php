@@ -211,7 +211,7 @@ class ScanCommand extends Command
             $elapsed = microtime(true) - $totalStart;
             $this->newLine();
             $this->renderSummary($result->fullGraph->nodeCount(), $result->fullGraph->edgeCount(), $result->totalRoutes, $result->totalCommands, $result->totalChannels, $result->totalFilamentResources, $elapsed);
-            $url = rtrim(config('app.url', 'http://localhost'), '/').'/_laravel-brain';
+            $url = rtrim(config('app.url', 'http://localhost'), '/').'/'.config('laravel-brain.route_prefix', '_laravel-brain');
             $this->newLine();
             $this->line("  Open the viewer: <fg=cyan;options=bold>{$url}</>");
             $this->newLine();
