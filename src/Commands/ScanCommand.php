@@ -210,7 +210,7 @@ class ScanCommand extends Command
         if ($verbose) {
             $elapsed = microtime(true) - $totalStart;
             $this->newLine();
-            $this->renderSummary($result->fullGraph->nodeCount(), $result->fullGraph->edgeCount(), $result->totalRoutes, $result->totalCommands, $result->totalChannels, $result->totalFilamentResources, $elapsed);
+            $this->renderSummary($result->fullGraph->nodeCount(), $result->fullGraph->edgeCount(), $result->totalRoutes, $result->totalCommands, $result->totalChannels, $result->totalFilamentResources, count($result->unresolvedDispatchers), $elapsed);
             $url = rtrim(config('app.url', 'http://localhost'), '/').'/_laravel-brain';
             $this->newLine();
             $this->line("  Open the viewer: <fg=cyan;options=bold>{$url}</>");
@@ -328,7 +328,7 @@ class ScanCommand extends Command
         file_put_contents($flagFile, date('Y-m-d H:i:s'));
     }
 
-    private function renderSummary(int $nodes, int $edges, int $routes, int $commands, int $channels, int $filamentResources, float $elapsed): void
+    private function renderSummary(int $nodes, int $edges, int $routes, int $commands, int $channels, int $filamentResources, int $unresolvedDispatchers, float $elapsed): void
     {
         $this->line('  <fg=gray>─────────────────────────────────────────</>');
         $this->line('  <options=bold>Summary</>');
@@ -344,6 +344,10 @@ class ScanCommand extends Command
 
         if ($filamentResources > 0) {
             $rows[] = ['Filament Res.', "<fg=cyan>{$filamentResources}</>"];
+        }
+
+        if ($unresolvedDispatchers > 0) {
+            $rows[] = ['Unresolved disp.', "<fg=yellow>{$unresolvedDispatchers}</>"];
         }
 
         $rows[] = ['Total time', '<fg=yellow>'.number_format($elapsed, 2).'s</>'];

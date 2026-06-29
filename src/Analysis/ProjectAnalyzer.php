@@ -24,6 +24,8 @@ class AnalysisResult
         public int $totalCommands = 0,
         public int $totalChannels = 0,
         public int $totalFilamentResources = 0,
+        /** @var string[] "FQCN::method" of methods that dispatch a job Brain couldn't resolve statically */
+        public array $unresolvedDispatchers = [],
     ) {}
 }
 
@@ -69,7 +71,11 @@ class ProjectAnalyzer
         $this->channelAnalyzer = new ChannelAnalyzer($channelPaths);
 
         $listenerPaths = config('laravel-brain.listeners.paths', ['app/Listeners']);
-        $this->listenerAnalyzer = new ListenerAnalyzer(is_array($listenerPaths) ? $listenerPaths : []);
+        $providerPaths = config('laravel-brain.listeners.provider_paths', ['app/Providers']);
+        $this->listenerAnalyzer = new ListenerAnalyzer(
+            is_array($listenerPaths) ? $listenerPaths : [],
+            is_array($providerPaths) ? $providerPaths : [],
+        );
 
         $cmdConfig = config('laravel-brain.commands', []);
         $this->consoleAnalyzer = new ConsoleAnalyzer(
@@ -80,7 +86,8 @@ class ProjectAnalyzer
 
         $this->middlewareAnalyzer = new MiddlewareAnalyzer;
         $this->controllerAnalyzer = new ControllerAnalyzer;
-        $this->methodTracer = new MethodTracer;
+        $dispatchHelpers = config('laravel-brain.dispatch.helpers', []);
+        $this->methodTracer = new MethodTracer(is_array($dispatchHelpers) ? $dispatchHelpers : []);
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
         $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
         $this->filamentAnalyzer = new FilamentAnalyzer;
@@ -150,8 +157,8 @@ class ProjectAnalyzer
             }
         }
 
-        // Link dispatched events to the listeners that handle them (discovered by convention).
-        foreach ($this->listenerAnalyzer->analyze($projectRoot) as $edge) {
+        // Link dispatched events to the listeners that handle them.
+        foreach ($this->listenerAnalyzer->analyze($projectRoot, $psr4Map) as $edge) {
             $callChain[] = $edge;
         }
 
@@ -304,6 +311,7 @@ class ProjectAnalyzer
             totalCommands: count($commands),
             totalChannels: count($channels),
             totalFilamentResources: $filamentResourceCount,
+            unresolvedDispatchers: $this->methodTracer->unresolvedDispatchers(),
         );
 
         $this->emit('analysis:done', [
