@@ -68,10 +68,46 @@ class MethodTracer
     /** @var array<string, 'enum'|'interface'|'trait'|'abstract_class'|null> */
     private array $declKindCache = [];
 
-    public function __construct()
+    /** Marker hop type for a dispatch verb whose job argument can't be resolved statically. */
+    public const UNRESOLVED_DISPATCH = 'unresolved-dispatch';
+
+    /** @var string[] extra global dispatch helper names beyond dispatch()/dispatch_sync() */
+    private array $extraDispatchHelpers;
+
+    /** @var array<string, true> "FQCN::method" of methods with an unresolvable dispatch */
+    private array $unresolvedDispatchers = [];
+
+    /**
+     * @param  string[]  $extraDispatchHelpers  custom dispatch helpers (e.g. dispatch_with_retries)
+     *                                          that wrap a queued job, treated like dispatch().
+     */
+    public function __construct(array $extraDispatchHelpers = [])
     {
         $this->parser = new PhpFileParser;
         $this->structureInspector = new PhpStructureInspector($this->parser);
+        $this->extraDispatchHelpers = array_values(array_filter(
+            $extraDispatchHelpers,
+            static fn ($name): bool => is_string($name) && $name !== '',
+        ));
+    }
+
+    /**
+     * Methods that dispatch a job Brain couldn't resolve statically (the job is a
+     * variable, factory result, or other non-literal). Lets a consumer mark such a
+     * dispatcher as "may reach unknown jobs" rather than "reaches none".
+     *
+     * @return string[] "FQCN::method"
+     */
+    public function unresolvedDispatchers(): array
+    {
+        return array_keys($this->unresolvedDispatchers);
+    }
+
+    private function recordUnresolvedDispatch(string $callerFqcn, string $callerMethod): void
+    {
+        if ($callerFqcn !== '' && $callerMethod !== '') {
+            $this->unresolvedDispatchers[$callerFqcn.'::'.$callerMethod] = true;
+        }
     }
 
     /**
@@ -116,6 +152,11 @@ class MethodTracer
 
         $edges = [];
         foreach ($discovered as $hop) {
+            if ($hop['type'] === self::UNRESOLVED_DISPATCH) {
+                $this->recordUnresolvedDispatch($callerFqcn, '__invoke');
+
+                continue;
+            }
             $edges[] = new CallChainEdge(
                 callerFqcn: $callerFqcn,
                 callerMethod: '__invoke',
@@ -148,6 +189,9 @@ class MethodTracer
         $this->projectRoot = $projectRoot;
         $this->visited = [];
         $this->classCache = [];
+        // NB: unresolvedDispatchers is NOT reset here. trace() runs more than once per analysis
+        // (controllers, then Filament pages), and like the returned edges the signal must
+        // accumulate across every call for the tracer's lifetime, not be wiped by the second run.
 
         $edges = [];
 
@@ -177,6 +221,11 @@ class MethodTracer
                 );
 
                 foreach ($discovered as $hop) {
+                    if ($hop['type'] === self::UNRESOLVED_DISPATCH) {
+                        $this->recordUnresolvedDispatch($controller->fqcn, $methodDef->name);
+
+                        continue;
+                    }
                     $edges[] = new CallChainEdge(
                         callerFqcn: $controller->fqcn,
                         callerMethod: $methodDef->name,
@@ -264,6 +313,11 @@ class MethodTracer
 
         $edges = [];
         foreach ($discovered as $hop) {
+            if ($hop['type'] === self::UNRESOLVED_DISPATCH) {
+                $this->recordUnresolvedDispatch($fqcn, $method);
+
+                continue;
+            }
             $edges[] = new CallChainEdge(
                 callerFqcn: $fqcn,
                 callerMethod: $method,
@@ -297,7 +351,9 @@ class MethodTracer
     ): array {
         $traverser = new NodeTraverser;
 
-        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this) extends NodeVisitorAbstract
+        $dispatchFunctions = array_values(array_unique(['dispatch', 'dispatch_sync', ...$this->extraDispatchHelpers]));
+
+        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions) extends NodeVisitorAbstract
         {
             /** @var list<array{fqcn:string,method:string,type:string,visibility:string}> */
             public array $hops = [];
@@ -314,19 +370,45 @@ class MethodTracer
 
             private const EVENT_FUNCTIONS = ['event'];
 
-            private const DISPATCH_FUNCTIONS = ['dispatch', 'dispatch_sync'];
+            /** @var string[] global dispatch helpers: built-in plus any configured extras */
+            private array $dispatchFunctions;
 
+            /**
+             * @param  string[]  $dispatchFunctions
+             */
             public function __construct(
                 array $varTypeMap,
                 array $useMap,
                 string $currentFqcn,
                 ?string $parentFqcn,
                 private MethodTracer $tracer,
+                array $dispatchFunctions = ['dispatch', 'dispatch_sync'],
             ) {
                 $this->varTypeMap = $varTypeMap;
                 $this->useMap = $useMap;
                 $this->currentFqcn = $currentFqcn;
                 $this->parentFqcn = $parentFqcn;
+                $this->dispatchFunctions = $dispatchFunctions;
+            }
+
+            private function markUnresolvedDispatch(): void
+            {
+                $this->hops[] = ['fqcn' => '', 'method' => '', 'type' => MethodTracer::UNRESOLVED_DISPATCH, 'visibility' => 'public'];
+            }
+
+            /**
+             * True when a dispatch argument is a job we couldn't read statically (a variable, property,
+             * or factory call) rather than nothing, or a string/array literal. A string/array first
+             * argument means an event dispatch ($this->dispatch('saved', ...) in Livewire/Filament),
+             * not a queued job, so it must not be reported as an unresolved job dispatch.
+             */
+            private function isOpaqueJobArg(?Node $arg): bool
+            {
+                $value = $arg instanceof Node\Arg ? $arg->value : $arg;
+
+                return $value !== null
+                    && ! $value instanceof Node\Scalar\String_
+                    && ! $value instanceof Node\Expr\Array_;
             }
 
             public function enterNode(Node $node): ?int
@@ -399,9 +481,11 @@ class MethodTracer
                 // and the array forms Bus::chain([new A, new B]) / Bus::batch([new A, new B]).
                 if (in_array($class, ['Bus', 'Illuminate\\Support\\Facades\\Bus'], true)
                     && in_array($method, ['dispatch', 'dispatchSync', 'chain', 'batch'], true)) {
-                    $jobClasses = in_array($method, ['chain', 'batch'], true)
-                        ? $this->extractNewClassesFromArray($node->args[0] ?? null)
-                        : array_filter([$this->extractNewClass($node->args[0] ?? null)]);
+                    $arg = $node->args[0] ?? null;
+                    $isGroup = in_array($method, ['chain', 'batch'], true);
+                    $jobClasses = $isGroup
+                        ? $this->extractNewClassesFromArray($arg)
+                        : array_filter([$this->extractNewClass($arg)]);
 
                     foreach ($jobClasses as $jobClass) {
                         $this->hops[] = [
@@ -410,6 +494,10 @@ class MethodTracer
                             'type' => 'job',
                             'visibility' => 'public',
                         ];
+                    }
+
+                    if ($this->busDispatchIsUnresolved($arg, $isGroup, count($jobClasses))) {
+                        $this->markUnresolvedDispatch();
                     }
 
                     return;
@@ -478,12 +566,17 @@ class MethodTracer
                     && $node->var instanceof Node\Expr\Variable
                     && $node->var->name === 'this'
                 ) {
-                    $jobClass = $this->extractNewClass($node->args[0] ?? null);
+                    $arg = $node->args[0] ?? null;
+                    $jobClass = $this->extractNewClass($arg);
                     if ($jobClass !== null) {
                         $jobFqcn = $this->useMap[$jobClass] ?? $jobClass;
                         if ($this->looksLikeJob($jobFqcn)) {
                             $this->hops[] = ['fqcn' => $jobFqcn, 'method' => 'handle', 'type' => 'job', 'visibility' => 'public'];
                         }
+                    } elseif ($this->isOpaqueJobArg($arg)) {
+                        // $this->dispatch($job) with a non-literal job — unresolved. A string/array arg is
+                        // a Livewire/Filament event dispatch, not a job, so isOpaqueJobArg() excludes it.
+                        $this->markUnresolvedDispatch();
                     }
 
                     return;
@@ -579,13 +672,17 @@ class MethodTracer
                             'visibility' => 'public',
                         ];
                     }
-                } elseif (in_array($funcName, self::DISPATCH_FUNCTIONS, true)) {
-                    $jobClass = $this->extractNewClass($node->args[0] ?? null);
-                    if ($jobClass) {
+                } elseif (in_array($funcName, $this->dispatchFunctions, true)) {
+                    $arg = $node->args[0] ?? null;
+                    $jobClass = $this->extractNewClass($arg);
+                    if ($jobClass !== null) {
                         $jobFqcn = $this->useMap[$jobClass] ?? $jobClass;
                         if ($this->looksLikeJob($jobFqcn)) {
                             $this->hops[] = ['fqcn' => $jobFqcn, 'method' => 'handle', 'type' => 'job', 'visibility' => 'public'];
                         }
+                    } elseif ($this->isOpaqueJobArg($arg)) {
+                        // A dispatch verb whose job is a variable / factory result, not a literal new — unresolved.
+                        $this->markUnresolvedDispatch();
                     }
                 }
             }
@@ -793,6 +890,27 @@ class MethodTracer
                 }
 
                 return null;
+            }
+
+            /**
+             * A Bus dispatch is unresolved when its job argument isn't a literal Brain can read:
+             * a single dispatch whose argument isn't `new Job`, or a chain/batch whose argument
+             * isn't an array literal or contains a non-literal entry. A no-arg call isn't a dispatch.
+             */
+            private function busDispatchIsUnresolved(?Node $arg, bool $isGroup, int $resolvedCount): bool
+            {
+                $value = $arg instanceof Node\Arg ? $arg->value : $arg;
+                if ($value === null) {
+                    return false;
+                }
+                if (! $isGroup) {
+                    return ! $value instanceof Node\Expr\New_;
+                }
+                if (! $value instanceof Node\Expr\Array_) {
+                    return true;
+                }
+
+                return count(array_filter($value->items)) > $resolvedCount;
             }
 
             /**

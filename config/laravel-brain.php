@@ -188,15 +188,34 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Job Dispatch
+    // -------------------------------------------------------------------------
+    // Brain resolves the built-in dispatch verbs (dispatch(), dispatch_sync(),
+    // Job::dispatch(), Bus::dispatch/chain/batch, $this->dispatch). List any
+    // custom global helper that wraps a queued job here so its dispatches are
+    // followed too, e.g. a project's own dispatch_with_retries().
+    //
+    'dispatch' => [
+        'helpers' => [],
+    ],
+
+    // -------------------------------------------------------------------------
     // Event Listeners
     // -------------------------------------------------------------------------
-    // Directories (relative to project root) scanned for listener classes.
-    // A class whose handle() type-hints an event in its first parameter is
-    // linked to that event, so the graph shows what runs when it dispatches.
+    // Event → listener edges are discovered from every registration form:
+    //   - convention: a class under "paths" whose handle()/__invoke() type-hints
+    //     the event in its first parameter;
+    //   - attribute: a class or method marked #[AsEventListener] under "paths";
+    //   - $listen / $subscribe: the maps declared in the providers under
+    //     "provider_paths" (subscriber subscribe() methods are followed too).
+    // So the graph shows what runs when an event dispatches, however it is wired.
     //
     'listeners' => [
         'paths' => [
             'app/Listeners',
+        ],
+        'provider_paths' => [
+            'app/Providers',
         ],
     ],
 
