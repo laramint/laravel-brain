@@ -1,3 +1,4 @@
+import { BASE } from './lib/base'
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import type { GraphViewportRef } from './types/graph'
 import { useManifest } from './hooks/useManifest'
@@ -169,7 +170,7 @@ export default function App() {
     if (!window.confirm('This will scan the entire project. Proceed?')) return
     setScanning(true)
     try {
-      const res = await fetch(import.meta.env.BASE_URL + 'api/scan', { method: 'POST' })
+      const res = await fetch(BASE + 'api/scan', { method: 'POST' })
       if (res.ok) {
         window.location.reload()
       } else {
@@ -198,7 +199,7 @@ export default function App() {
       <div className="error-screen welcome-screen">
         <div className="welcome-card">
           <div className="welcome-icon">
-            <img src="/_laravel-brain/logo.png" alt="Laravel Brain" />
+            <img src={`${BASE}logo.png`} alt="Laravel Brain" />
           </div>
           <h2>Welcome to Laravel Brain</h2>
           <p>No project analysis found. To begin exploring your code architecture, please run an initial scan.</p>

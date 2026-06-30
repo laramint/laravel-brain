@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useState, useCallback } from 'react'
 
 interface Target {
@@ -64,7 +65,7 @@ export function AiRulesModal({ onClose }: Props) {
     setStatuses(initial)
 
     try {
-      const res = await fetch(import.meta.env.BASE_URL + 'api/generate-rules', {
+      const res = await fetch(BASE + 'api/generate-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets: [...selected], force }),

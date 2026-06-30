@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useEffect, useState } from 'react'
 import type { GraphData, GraphNode } from '../types/graph'
 import type { GraphElement } from '../types/graph'
@@ -15,7 +16,7 @@ export function useGraph(): UseGraphResult {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(import.meta.env.BASE_URL + 'graph.json')
+    fetch(BASE + 'graph.json')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()

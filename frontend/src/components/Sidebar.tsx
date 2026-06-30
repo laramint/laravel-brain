@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import React, { useMemo, useRef, useCallback, useState } from 'react'
 import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
@@ -146,7 +147,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
     setAiLoading(true)
     try {
       const res = await fetch(
-        import.meta.env.BASE_URL + `api/context?nodeId=${encodeURIComponent(selectedId)}&budget=6000`
+        BASE + `api/context?nodeId=${encodeURIComponent(selectedId)}&budget=6000`
       )
       if (!res.ok) throw new Error('Failed to fetch context')
       const text = await res.text()

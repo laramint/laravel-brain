@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import type { GraphViewportRef } from '../types/graph'
 import { LARGE_GRAPH_THRESHOLD } from '../utils/graphConstants'
@@ -106,7 +107,7 @@ export function Toolbar({
     if (!window.confirm('This will re-scan the entire project. Proceed?')) return
     setScanning(true)
     try {
-      const res = await fetch(import.meta.env.BASE_URL + 'api/scan', { method: 'POST' })
+      const res = await fetch(BASE + 'api/scan', { method: 'POST' })
       if (res.ok) window.location.reload()
       else alert('Scan failed.')
     } catch {
@@ -134,7 +135,7 @@ export function Toolbar({
       <div className="toolbar">
         <div className="toolbar-brand">
           <img
-            src={`${import.meta.env.BASE_URL}logo.png`}
+            src={`${BASE}logo.png`}
             alt="Laravel Brain"
             className="toolbar-logo-img"
             width={28}

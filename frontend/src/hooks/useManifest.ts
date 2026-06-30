@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useEffect, useState } from 'react'
 import type { Manifest } from '../types/graph'
 
@@ -13,7 +14,7 @@ export function useManifest(): UseManifestResult {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(import.meta.env.BASE_URL + '.graph-manifest.json')
+    fetch(BASE + '.graph-manifest.json')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()

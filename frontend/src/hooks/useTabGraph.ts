@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { GraphData } from '../types/graph'
 import type { GraphElement } from '../types/graph'
@@ -50,7 +51,7 @@ export function useTabGraph(): UseTabGraphResult {
 
     setState((prev) => ({ ...prev, loading: true, error: null }))
 
-    fetch(import.meta.env.BASE_URL + file)
+    fetch(BASE + file)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { StressTestResult } from '../types/graph'
+import { BASE } from '../lib/base'
 
 interface Props {
   method: string
@@ -119,12 +120,11 @@ export function StressTestPanel({ method, uri, selectedId, onStressChange }: Pro
   const currentKey = `${method}::${uri}`
   const uriParams = extractParams(uri)
 
-  // Todo 1: derive base URL from the /_laravel-brain URL path so subdirectory
-  // installs (e.g. http://myapp.test/sub/_laravel-brain) also work correctly.
   const [baseUrl, setBaseUrl] = useState(() => {
-    const href = window.location.href
-    const idx = href.indexOf('/_laravel-brain')
-    return idx !== -1 ? href.slice(0, idx) : window.location.origin
+    // Derive the app origin from the runtime brain prefix so subdirectory installs work.
+    const base = BASE.replace(/\/$/, '')
+    const idx = base.lastIndexOf('/')
+    return idx > 0 ? window.location.origin + base.slice(0, idx) : window.location.origin
   })
 
   // Todo 2: initialise all state lazily from the cache (memory + localStorage).
@@ -177,7 +177,7 @@ export function StressTestPanel({ method, uri, selectedId, onStressChange }: Pro
       if (signal.aborted) return
 
       try {
-        const res = await fetch(`/_laravel-brain/api/stress-test/${jobId}`, { signal })
+        const res = await fetch(`${BASE}api/stress-test/${jobId}`, { signal })
         const data = await res.json()
 
         if (data.status === 'done') {
@@ -294,7 +294,7 @@ export function StressTestPanel({ method, uri, selectedId, onStressChange }: Pro
     const mergedHeaders = { ...extraHeaders, ...parseHeaders(headersRaw) }
 
     try {
-      const res = await fetch('/_laravel-brain/api/stress-test', {
+      const res = await fetch(`${BASE}api/stress-test`, {
         method: 'POST',
         signal,
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },

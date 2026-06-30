@@ -1,3 +1,4 @@
+import { BASE } from '../lib/base'
 import { useState, useEffect } from 'react'
 
 export function useFileSource(filePath: string | null) {
@@ -22,7 +23,7 @@ export function useFileSource(filePath: string | null) {
   useEffect(() => {
     if (!filePath) return
 
-    fetch(`${import.meta.env.BASE_URL}api/source?path=${encodeURIComponent(filePath)}`)
+    fetch(`${BASE}api/source?path=${encodeURIComponent(filePath)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) throw new Error(data.error)
