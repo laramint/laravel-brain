@@ -1224,12 +1224,22 @@ class RouteAnalyzer
                 if ($methodsValue === null) {
                     return;
                 }
-                $methods = $this->extractMiddlewareList($methodsValue);
+
+                // extractMiddlewareList() resolves a ClassConstFetch to its class name, which is
+                // right for `SomeMiddleware::class` but wrong for a verb written as a class
+                // constant (e.g. Request::METHOD_GET) — that would come back as the class's FQCN,
+                // not a verb. Filtering to the verbs this analyzer actually understands drops such
+                // an entry instead of registering a bogus route, matching how an unrecognised verb
+                // was already handled before Route::match() support existed: silently ignored.
+                $methods = array_values(array_intersect(
+                    array_unique(array_map('strtolower', $this->extractMiddlewareList($methodsValue))),
+                    [...self::HTTP_METHODS, 'head'],
+                ));
                 if ($methods === []) {
                     return;
                 }
 
-                foreach (array_unique(array_map('strtolower', $methods)) as $method) {
+                foreach ($methods as $method) {
                     $this->handleHttpRoute($node, $method, $extraMiddlewares, 1);
                 }
             }

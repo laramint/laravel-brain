@@ -144,6 +144,8 @@ it('expands Route::match into one route per HTTP verb', function () {
 
 use Illuminate\Support\Facades\Route;
 
+Route::match(['get', 'put'], '/plain', [\App\Http\Controllers\AuthController::class, 'plain']);
+
 Route::prefix('gateway')->middleware(['throttle:api'])->group(function () {
     Route::match(['get', 'post'], '/token', [\App\Http\Controllers\AuthController::class, 'token'])
         ->middleware('log.requests');
@@ -154,10 +156,20 @@ PHP
 
     try {
         $routes = (new RouteAnalyzer(['routes/*/*.php']))->analyze($tmp);
-        expect($routes)->toHaveCount(2);
+        expect($routes)->toHaveCount(4);
 
-        $get = findRoute($routes, fn ($r) => $r->method === 'GET');
-        $post = findRoute($routes, fn ($r) => $r->method === 'POST');
+        // Plain, unchained Route::match([...], $uri, $action) — no group, no post-chain.
+        $plainGet = findRoute($routes, fn ($r) => $r->uri === '/plain' && $r->method === 'GET');
+        $plainPut = findRoute($routes, fn ($r) => $r->uri === '/plain' && $r->method === 'PUT');
+        expect($plainGet)->toBeInstanceOf(RouteDefinition::class)
+            ->controller->toBe('App\Http\Controllers\AuthController')
+            ->action->toBe('plain');
+        expect($plainPut)->toBeInstanceOf(RouteDefinition::class)
+            ->controller->toBe('App\Http\Controllers\AuthController')
+            ->action->toBe('plain');
+
+        $get = findRoute($routes, fn ($r) => $r->uri === '/gateway/token' && $r->method === 'GET');
+        $post = findRoute($routes, fn ($r) => $r->uri === '/gateway/token' && $r->method === 'POST');
 
         expect($get)->toBeInstanceOf(RouteDefinition::class)
             ->uri->toBe('/gateway/token')
@@ -170,6 +182,42 @@ PHP
             ->controller->toBe('App\Http\Controllers\AuthController')
             ->action->toBe('token');
         expect($post->middlewares)->toContain('throttle:api')->toContain('log.requests');
+    } finally {
+        routeAnalyzerTestDeleteTree($tmp);
+    }
+});
+
+it('ignores a Route::match verb written as a class constant instead of a string', function () {
+    $tmp = sys_get_temp_dir().'/lb-route-analyzer-'.uniqid('', true);
+    mkdir($tmp.'/routes/web', 0777, true);
+    file_put_contents(
+        $tmp.'/routes/web/constant-verb.php',
+        <<<'PHP'
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
+Route::match([Request::METHOD_GET], '/constant', [\App\Http\Controllers\AuthController::class, 'constant']);
+Route::match(['get', Request::METHOD_POST], '/mixed', [\App\Http\Controllers\AuthController::class, 'mixed']);
+
+PHP
+    );
+
+    try {
+        $routes = (new RouteAnalyzer(['routes/*/*.php']))->analyze($tmp);
+
+        // A verb given only as a class constant can't be resolved to a real HTTP
+        // method, so the whole route is dropped rather than registered under a
+        // bogus "method" (the class's FQCN).
+        expect(findRoute($routes, fn ($r) => $r->uri === '/constant'))->toBeNull();
+
+        // A route mixing a literal verb with a class-constant verb keeps the
+        // verb it could resolve and drops the one it couldn't.
+        $mixed = findRoute($routes, fn ($r) => $r->uri === '/mixed');
+        expect($mixed)->toBeInstanceOf(RouteDefinition::class)
+            ->method->toBe('GET');
+        expect(findRoute($routes, fn ($r) => $r->uri === '/mixed' && $r->method !== 'GET'))->toBeNull();
     } finally {
         routeAnalyzerTestDeleteTree($tmp);
     }
