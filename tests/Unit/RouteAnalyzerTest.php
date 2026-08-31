@@ -134,6 +134,47 @@ PHP
     }
 });
 
+it('expands Route::match into one route per HTTP verb', function () {
+    $tmp = sys_get_temp_dir().'/lb-route-analyzer-'.uniqid('', true);
+    mkdir($tmp.'/routes/web', 0777, true);
+    file_put_contents(
+        $tmp.'/routes/web/gateway.php',
+        <<<'PHP'
+<?php
+
+use Illuminate\Support\Facades\Route;
+
+Route::prefix('gateway')->middleware(['throttle:api'])->group(function () {
+    Route::match(['get', 'post'], '/token', [\App\Http\Controllers\AuthController::class, 'token'])
+        ->middleware('log.requests');
+});
+
+PHP
+    );
+
+    try {
+        $routes = (new RouteAnalyzer(['routes/*/*.php']))->analyze($tmp);
+        expect($routes)->toHaveCount(2);
+
+        $get = findRoute($routes, fn ($r) => $r->method === 'GET');
+        $post = findRoute($routes, fn ($r) => $r->method === 'POST');
+
+        expect($get)->toBeInstanceOf(RouteDefinition::class)
+            ->uri->toBe('/gateway/token')
+            ->controller->toBe('App\Http\Controllers\AuthController')
+            ->action->toBe('token');
+        expect($get->middlewares)->toContain('throttle:api')->toContain('log.requests');
+
+        expect($post)->toBeInstanceOf(RouteDefinition::class)
+            ->uri->toBe('/gateway/token')
+            ->controller->toBe('App\Http\Controllers\AuthController')
+            ->action->toBe('token');
+        expect($post->middlewares)->toContain('throttle:api')->toContain('log.requests');
+    } finally {
+        routeAnalyzerTestDeleteTree($tmp);
+    }
+});
+
 it('auto-discover mode pulls routes from the live router', function () {
     $router = makeAutoDiscoverRouter();
 
