@@ -366,8 +366,10 @@ return [
     // class_paths          Directories containing Command class files.
     //                      (typically app/Console/Commands/)
     //
-    // kernel_paths         Path(s) to Console\Kernel.php for the $commands
-    //                      property and the schedule() method.
+    // kernel_paths         Files holding a scheduling closure or method: the $commands
+    //                      property and schedule() method of a legacy Console\Kernel, and
+    //                      the ->withSchedule(…) closure a Laravel 11+ skeleton puts in
+    //                      bootstrap/app.php instead (that skeleton has no Kernel at all).
     //
     'commands' => [
         'console_route_paths' => [
@@ -378,6 +380,7 @@ return [
         ],
         'kernel_paths' => [
             'app/Console/Kernel.php',
+            'bootstrap/app.php',
         ],
     ],
 

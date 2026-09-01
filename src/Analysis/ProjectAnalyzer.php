@@ -154,7 +154,7 @@ class ProjectAnalyzer
         $this->consoleAnalyzer = new ConsoleAnalyzer(
             consoleRoutePaths: $cmdConfig['console_route_paths'] ?? ['routes/*/*.php'],
             classPaths: $cmdConfig['class_paths'] ?? ['app/Console/Commands/*/*.php'],
-            kernelPaths: $cmdConfig['kernel_paths'] ?? ['app/Console/Kernel.php'],
+            kernelPaths: $cmdConfig['kernel_paths'] ?? ConsoleAnalyzer::DEFAULT_KERNEL_PATHS,
         );
 
         $this->middlewareAnalyzer = new MiddlewareAnalyzer;

@@ -80,3 +80,20 @@ it('reads the cadence off the scheduling chain', function () {
         ->and($byTarget['Acme\\Shop\\Jobs\\ReconcilePayouts']->frequency)->toBe('hourly')
         ->and($byTarget['Acme\\Shop\\Jobs\\ReconcilePayouts']->type)->toBe('job');
 });
+
+it('reads the time a cadence was given, and the guard wrapped around it', function () {
+    // The method name alone does not answer the question the schedule list exists to answer:
+    // `dailyAt` is not a time. The argument is.
+    $result = modularConsoleAnalyzer()->analyze(fixture('modular-project'));
+
+    $byTarget = [];
+    foreach ($result['schedule'] as $entry) {
+        $byTarget[$entry->target] = $entry;
+    }
+
+    expect($byTarget['shop:sync-orders']->frequencyArguments)->toBe(['05:30'])
+        ->and($byTarget['shop:sync-orders']->cadence())->toBe('dailyAt 05:30')
+        ->and($byTarget['shop:sync-orders']->modifiers)->toBe(['withoutOverlapping'])
+        ->and($byTarget['Acme\\Shop\\Jobs\\ReconcilePayouts']->cadence())->toBe('hourly')
+        ->and($byTarget['Acme\\Shop\\Jobs\\ReconcilePayouts']->modifiers)->toBe([]);
+});

@@ -3818,6 +3818,40 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
 }
 .route-row-loading { color: var(--faint); }
 
+/* A schedule row is two lines: what runs, then when and under which guards. The kind marker
+   sits in the same column the HTTP method occupies, so schedules and routes stay aligned. */
+.route-row--stacked { align-items: flex-start; }
+.route-row--stacked .route-row-method { padding-top: 1px; }
+.schedule-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.schedule-row-body .route-row-uri { white-space: normal; overflow-wrap: anywhere; }
+.schedule-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.schedule-cadence {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+}
+.schedule-cadence--unknown { color: var(--faint); font-style: italic; }
+.schedule-chip {
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+
 .flag-list { display: flex; flex-direction: column; gap: 7px; padding: 6px 4px; }
 .flag-card {
   text-align: left;

@@ -2567,17 +2567,22 @@ class GraphBuilder
         }
 
         foreach ($schedules as $entry) {
-            $schedId = 'schedule::'.md5($entry->type.$entry->target.$entry->frequency);
+            $schedId = $entry->nodeId();
 
             if (! $this->graph->hasNode($schedId)) {
-                $label = $entry->frequency
-                    ? "{$entry->target} ({$entry->frequency})"
+                $cadence = $entry->cadence();
+                $label = $cadence !== ''
+                    ? "{$entry->target} ({$cadence})"
                     : $entry->target;
 
                 $this->graph->addNode(new Node($schedId, 'schedule', $label, [
                     'type' => $entry->type,
                     'target' => $entry->target,
                     'frequency' => $entry->frequency,
+                    'frequencyArguments' => $entry->frequencyArguments,
+                    'cadence' => $cadence,
+                    'modifiers' => $entry->modifiers,
+                    'timezone' => $entry->timezone,
                     'file' => $entry->file,
                 ]));
             }

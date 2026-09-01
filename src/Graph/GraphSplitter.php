@@ -38,6 +38,16 @@ class TabManifestEntry
         public int $n1Count = 0,
         public int $fatMethodCount = 0,
         public int $fatClassCount = 0,
+        /**
+         * When and how a scheduled task runs — null on every tab that is not one.
+         *
+         * Carried on the manifest rather than left in the tab's own graph file because the
+         * sidebar renders the row before any graph is fetched, and a schedule row that cannot
+         * say what it fires and when is the row this field exists to stop.
+         *
+         * @var array{type: string, target: string, cadence: string, timezone: string, modifiers: string[]}|null
+         */
+        public ?array $schedule = null,
     ) {}
 }
 
@@ -172,25 +182,47 @@ class GraphSplitter
         }
 
         // ── Scheduled-task tabs ───────────────────────────────────────────────
-        if (! empty($schedules)) {
-            $scheduleFile = $schedules[0]->file ?? '';
-            $seeds = [];
-            foreach ($schedules as $entry) {
-                $seeds[] = 'schedule::'.md5($entry->type.$entry->target.$entry->frequency);
+        // One tab per scheduled task, the way commands and channels already work. A single
+        // "Scheduled Tasks" tab put exactly one row in the sidebar's Schedules bucket however
+        // many tasks the app had, so the list answered "does this app schedule anything?" and
+        // nothing else — what fires at 03:00 was only readable after opening the tab.
+        $scheduleTabs = [];
+        foreach ($schedules as $entry) {
+            $seedId = $entry->nodeId();
+            if (isset($scheduleTabs[$seedId])) {
+                // The same task written twice produces one node, so it gets one tab.
+                continue;
             }
-            $tabId = 'schedule--tasks';
-            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, $seeds, $projectName, $analyzedAt);
+
+            $baseId = $this->sanitizeId('schedule '.$entry->type.' '.$entry->target);
+            $tabId = $baseId;
+            $collision = 2;
+            while (isset($subgraphs[$tabId])) {
+                // Two tasks can differ only in cadence — the same command at 05:00 and at
+                // 17:00 — and the sanitized id drops exactly that difference.
+                $tabId = $baseId.'-'.$collision++;
+            }
+            $scheduleTabs[$seedId] = $tabId;
+
+            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, [$seedId], $projectName, $analyzedAt);
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(
                 id: $tabId,
-                label: 'Scheduled Tasks',
-                routeCount: count($schedules),
+                label: $entry->target,
+                routeCount: 1,
                 nodeCount: $subgraph->nodeCount(),
                 edgeCount: $subgraph->edgeCount(),
                 file: ".graph-{$tabId}.json",
-                routeFile: $this->relativeRouteFile($scheduleFile),
+                routeFile: $this->relativeRouteFile($entry->file),
                 category: 'Schedule',
+                schedule: [
+                    'type' => $entry->type,
+                    'target' => $entry->target,
+                    'cadence' => $entry->cadence(),
+                    'timezone' => $entry->timezone,
+                    'modifiers' => $entry->modifiers,
+                ],
             );
         }
 
@@ -682,6 +714,9 @@ class GraphSplitter
             ];
             if ($entry->panelId !== '') {
                 $tab['panelId'] = $entry->panelId;
+            }
+            if ($entry->schedule !== null) {
+                $tab['schedule'] = $entry->schedule;
             }
             if ($entry->issueCount > 0) {
                 $tab['issueCount'] = $entry->issueCount;

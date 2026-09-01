@@ -1,8 +1,8 @@
 import { useRef, useState, useCallback, useMemo } from 'react'
 import { FilterPanel } from './FilterPanel'
 import { Tooltip } from './Tooltip'
-import { SECURITY_RISK_COLORS, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
-import type { TabEntry, GraphData } from '../types/graph'
+import { ACCENT_COLORS, SECURITY_RISK_COLORS, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
+import type { TabEntry, GraphData, ScheduleInfo } from '../types/graph'
 
 const RISK_ORDER: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 }
 
@@ -68,6 +68,13 @@ function splitLabel(label: string): { method: string | null; uri: string } {
   return { method: null, uri: label }
 }
 
+/** Everything about a tab the search box should be able to reach, lowercased. */
+function searchText(tab: TabEntry): string {
+  const s = tab.schedule
+  const extra = s ? ` ${s.cadence} ${s.timezone} ${s.modifiers.join(' ')}` : ''
+  return `${tab.label}${extra}`.toLowerCase()
+}
+
 function riskOf(tab: TabEntry): string {
   return tab.riskLevel ?? 'none'
 }
@@ -124,6 +131,76 @@ function RouteItem({ tab, isActive, isLoading, onSelect }: {
       </button>
     </Tooltip>
   )
+}
+
+// What a scheduled task points at, in the width the method column already has.
+const SCHEDULE_KINDS: Record<ScheduleInfo['type'], string> = {
+  command: 'CMD',
+  job: 'JOB',
+  call: 'FN',
+}
+
+// The chained guards, spelled the way they read rather than the way they are called.
+// `evenInMaintenanceMode` does not fit a 300px column and `withoutOverlapping` barely does.
+const MODIFIER_LABELS: Record<string, string> = {
+  withoutOverlapping: 'no overlap',
+  onOneServer: 'one server',
+  runInBackground: 'background',
+  evenInMaintenanceMode: 'in maintenance',
+}
+
+/** A job is scheduled by FQCN; the namespace is the half that never distinguishes two rows. */
+function shortTarget(target: string): string {
+  const short = target.split('\\').pop()
+  return short && short.length > 0 ? short : target
+}
+
+function ScheduleItem({ tab, schedule, isActive, isLoading, onSelect }: {
+  tab: TabEntry
+  schedule: ScheduleInfo
+  isActive: boolean
+  isLoading: boolean
+  onSelect: (tab: TabEntry) => void
+}) {
+  // An empty cadence is a real reading, not a missing one: the chain never said when to run,
+  // which is worth showing as loudly as a time would be.
+  const cadence = schedule.cadence || 'no cadence stated'
+  const guards = schedule.modifiers.map((m) => MODIFIER_LABELS[m] ?? m)
+
+  return (
+    <Tooltip content={`${schedule.target} · ${cadence}${schedule.timezone ? ` · ${schedule.timezone}` : ''} · ${tab.nodeCount} nodes`}>
+      <button
+        className={`route-row route-row--stacked ${isActive ? 'route-row--active' : ''}`}
+        type="button"
+        onClick={() => onSelect(tab)}
+      >
+        <span className="route-row-method" style={{ color: ACCENT_COLORS[schedule.type === 'job' ? 'job' : 'command'] }}>
+          {SCHEDULE_KINDS[schedule.type] ?? '›'}
+        </span>
+        <span className="schedule-row-body">
+          <span className="route-row-uri">{shortTarget(schedule.target)}</span>
+          <span className="schedule-row-meta">
+            <span className={`schedule-cadence ${schedule.cadence ? '' : 'schedule-cadence--unknown'}`}>{cadence}</span>
+            {schedule.timezone && <span className="schedule-chip">{schedule.timezone}</span>}
+            {guards.map((g) => <span key={g} className="schedule-chip">{g}</span>)}
+          </span>
+        </span>
+        {isLoading && <span className="route-row-loading">…</span>}
+      </button>
+    </Tooltip>
+  )
+}
+
+/** A schedule row carries its own shape; everything else in the tree is a route row. */
+function LeafItem({ tab, isActive, isLoading, onSelect }: {
+  tab: TabEntry
+  isActive: boolean
+  isLoading: boolean
+  onSelect: (tab: TabEntry) => void
+}) {
+  return tab.schedule
+    ? <ScheduleItem tab={tab} schedule={tab.schedule} isActive={isActive} isLoading={isLoading} onSelect={onSelect} />
+    : <RouteItem tab={tab} isActive={isActive} isLoading={isLoading} onSelect={onSelect} />
 }
 
 // Modern monochrome (lucide-style) icon glyphs. Each entry is the inner SVG
@@ -378,7 +455,7 @@ function TreeGroup({
             />
           ))}
           {node.leaves.map((tab) => (
-            <RouteItem
+            <LeafItem
               key={tab.id}
               tab={tab}
               isActive={tab.id === activeId}
@@ -489,7 +566,9 @@ export function LeftSidebar({
   const filteredTabs = useMemo(() => {
     const allMethodsVisible = ALL_HTTP_METHODS.every((m) => visibleMethods.has(m))
     return tabs.filter((t) => {
-      if (query && !t.label.toLowerCase().includes(query)) return false
+      // A schedule row shows more than its label, and "cron" or "05:30" is exactly the thing
+      // someone types when they are hunting for what fires overnight.
+      if (query && !searchText(t).includes(query)) return false
       if (!allMethodsVisible) {
         const firstWord = t.label.split(' ')[0]
         if (firstWord in METHOD_COLORS && !visibleMethods.has(firstWord)) return false
@@ -590,7 +669,7 @@ export function LeftSidebar({
                 />
               ))}
               {tree.leaves.map((tab) => (
-                <RouteItem
+                <LeafItem
                   key={tab.id}
                   tab={tab}
                   isActive={tab.id === activeId}
