@@ -563,6 +563,21 @@ class GraphBuilder
         //   OrderService::createOrder → SendOrderConfirmationJob::handle (job)
 
         foreach ($callChain as $edge) {
+            // A listener edge is the one hop whose caller is a class nobody calls: the event.
+            // `nodeIdForHop` would mangle it to `filamerce_sale_events_orderitemcreated::__construct`
+            // while every graph that shows the event shows `event::FQCN` — two nodes for one class,
+            // with the listener hanging off the one no route can reach. Measured before this: 102
+            // route tabs carried an event node and not one carried a listener. Same fix the model
+            // observers already use, for the same reason.
+            if ($edge->type === 'listener') {
+                $eventNode = $this->eventId($edge->callerFqcn);
+                $this->addEventNode($edge->callerFqcn, $eventNode);
+                $this->ensureNode($edge->calleeFqcn, $edge->calleeMethod, 'listener', $models);
+                $this->addEdge($eventNode, $this->hopCalleeNodeId($edge), 'handled by', 'event-to-listener');
+
+                continue;
+            }
+
             $callerNode = $this->nodeIdForHop($edge->callerFqcn, $edge->callerMethod);
             $calleeNode = $this->hopCalleeNodeId($edge);
 
