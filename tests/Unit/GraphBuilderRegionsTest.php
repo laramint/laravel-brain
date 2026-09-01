@@ -6,10 +6,10 @@ use LaraMint\LaravelBrain\Graph\Graph;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
 
 /** Build the graph of one method of the job-groups fixture, regions stamped as a full run does. */
-function shipmentGraph(string $method, ?GraphBuilder &$builder = null): Graph
+function shipmentGraph(string $method, ?GraphBuilder &$builder = null, bool $detectJobGroups = true): Graph
 {
     $root = fixture('job-groups-project');
-    $tracer = new MethodTracer;
+    $tracer = new MethodTracer(detectJobGroups: $detectJobGroups);
     $edges = $tracer->traceMethod('App\Services\ShipmentDispatcher', $method, ['App\\' => [$root.'/app']], $root);
 
     $builder = new GraphBuilder;
@@ -151,4 +151,22 @@ it('does not stamp a region twice when the same group is stamped again', functio
     }
 
     expect($node->data['regions'])->toHaveCount(1);
+});
+
+it('draws the transaction when chain and batch detection is switched off', function () {
+    // The two are separate features with separate switches: the batch here comes from the
+    // dispatch-site detector, the transaction from the scope collector, and turning the first
+    // off must leave the second exactly as it was.
+    $builder = null;
+    $graph = shipmentGraph('batchInsideATransaction', $builder, detectJobGroups: false);
+
+    expect(array_keys(regionsOfJob($graph, 'ReindexOrder')))->toBe(['transaction']);
+});
+
+it('draws the batch when detection is left on, on the same method', function () {
+    // The other position of the same switch, on the same fixture: without this the test above
+    // would pass just as well against a fixture that never had a batch in it.
+    $graph = shipmentGraph('batchInsideATransaction');
+
+    expect(array_keys(regionsOfJob($graph, 'ReindexOrder')))->toBe(['transaction', 'batch']);
 });

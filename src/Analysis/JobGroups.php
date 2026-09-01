@@ -160,11 +160,35 @@ final class JobGroups
             return null;
         }
 
-        if (! $value instanceof Node\Expr\Array_) {
-            return new JobGroup($kind, [], $head, $headDispatchesItself, unresolved: true);
+        ['jobs' => $entries, 'unresolved' => $unresolved] = self::jobsInArray($arg);
+
+        return new JobGroup($kind, $entries, $head, $headDispatchesItself, $unresolved);
+    }
+
+    /**
+     * The jobs named by an array literal handed to a dispatch verb, in the order they were written.
+     *
+     * Public because both readers of a chain need it and there must be one answer to "what counts
+     * as an entry": the region detector above, and the plain `Bus::chain([...])` handling in the
+     * tracer that stands in for it when chain and batch regions are switched off. Two copies would
+     * drift — one of them would learn about `A::class` and the other would not — and the drift
+     * would show as a job that appears on the graph only while a display setting is on.
+     *
+     * @return array{jobs: list<string>, unresolved: bool}
+     */
+    public static function jobsInArray(?Node $arg): array
+    {
+        $value = $arg instanceof Node\Arg ? $arg->value : $arg;
+
+        if ($value === null) {
+            return ['jobs' => [], 'unresolved' => false];
         }
 
-        $entries = [];
+        if (! $value instanceof Node\Expr\Array_) {
+            return ['jobs' => [], 'unresolved' => true];
+        }
+
+        $jobs = [];
         $unresolved = false;
 
         foreach ($value->items as $item) {
@@ -176,10 +200,10 @@ final class JobGroups
                 continue;
             }
 
-            $entries[] = $class;
+            $jobs[] = $class;
         }
 
-        return new JobGroup($kind, $entries, $head, $headDispatchesItself, $unresolved);
+        return ['jobs' => $jobs, 'unresolved' => $unresolved];
     }
 
     /**

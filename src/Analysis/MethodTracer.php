@@ -86,18 +86,29 @@ class MethodTracer
     private array $sourcePaths;
 
     /**
+     * Whether dispatch sites are read for the chain and batch they dispatch.
+     *
+     * Off, {@see JobGroups} is never asked about a node — the detection does not run and produce
+     * a result nobody draws. The jobs of a `Bus::chain([...])` are still recorded as edges by the
+     * plain dispatch handling, because switching a boundary off is a statement about what the
+     * canvas draws, not about which work exists.
+     */
+    private bool $detectJobGroups;
+
+    /**
      * @param  string[]  $extraDispatchHelpers
      * @param  string[]  $sourcePaths  class-file search roots, relative to the project root
-     */
-    /**
      * @param  bool  $detectTransactions  read transaction spans while scanning; off skips the
      *                                    traversal entirely rather than discarding its result
+     * @param  bool  $detectJobGroups  read chains and batches at their dispatch sites
      */
     public function __construct(
         array $extraDispatchHelpers = [],
         array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS,
         private readonly bool $detectTransactions = true,
+        bool $detectJobGroups = true,
     ) {
+        $this->detectJobGroups = $detectJobGroups;
         $this->sourcePaths = $sourcePaths;
         $this->parser = new PhpFileParser;
         $this->structureInspector = new PhpStructureInspector($this->parser);
@@ -411,7 +422,7 @@ class MethodTracer
 
         $spanKey = $currentFqcn.'::'.($ast instanceof Node\Stmt\ClassMethod ? $ast->name->toString() : '__closure');
 
-        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey) extends NodeVisitorAbstract
+        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey, $this->detectJobGroups) extends NodeVisitorAbstract
         {
             /** @var list<array{fqcn:string,method:string,type:string,visibility:string,inTransaction?:bool,inRollback?:bool,transactionId?:string|null}> */
             public array $hops = [];
@@ -450,6 +461,7 @@ class MethodTracer
                 array $dispatchFunctions,
                 private TransactionScopes $scopes,
                 private string $spanKey = '',
+                private bool $detectJobGroups = true,
             ) {
                 $this->varTypeMap = $varTypeMap;
                 $this->useMap = $useMap;
@@ -518,7 +530,11 @@ class MethodTracer
                 // batch is several dispatches written as one call, so the ordinary Bus branch
                 // below would record the jobs a second time and the graph would carry each of
                 // those edges twice.
-                $group = JobGroups::at($node);
+                //
+                // Not asked at all when the feature is off. The question is the whole cost of it
+                // — there is no separate scan to skip later — so the gate belongs here, before
+                // the detector runs, rather than around the result it would have produced.
+                $group = $this->detectJobGroups ? JobGroups::at($node) : null;
 
                 if ($group !== null) {
                     $this->handleJobGroup($group);
@@ -606,9 +622,32 @@ class MethodTracer
                     return;
                 }
 
-                // Bus facade: Bus::dispatch(new Job) / Bus::dispatchSync(new Job). The array
-                // forms — Bus::chain / Bus::batch — never reach here: they are groups, and
-                // enterNode has already handed them to handleJobGroup().
+                // The array forms reach here only while chain and batch detection is off: with it
+                // on, enterNode has already handed them to handleJobGroup() and returned. The
+                // jobs are recorded either way — a boundary switched off must not take the work
+                // it drew around off the graph with it — but nothing is remembered about the
+                // group, which is the part that was switched off.
+                if (in_array($class, ['Bus', 'Illuminate\\Support\\Facades\\Bus'], true)
+                    && in_array($method, ['chain', 'batch'], true)) {
+                    ['jobs' => $jobClasses, 'unresolved' => $unresolved] = JobGroups::jobsInArray($node->args[0] ?? null);
+
+                    foreach ($jobClasses as $jobClass) {
+                        $this->hops[] = [
+                            'fqcn' => $this->useMap[$jobClass] ?? $jobClass,
+                            'method' => 'handle',
+                            'type' => 'job',
+                            'visibility' => 'public',
+                        ];
+                    }
+
+                    if ($unresolved) {
+                        $this->markUnresolvedDispatch();
+                    }
+
+                    return;
+                }
+
+                // Bus facade: Bus::dispatch(new Job) / Bus::dispatchSync(new Job).
                 if (in_array($class, ['Bus', 'Illuminate\\Support\\Facades\\Bus'], true)
                     && in_array($method, ['dispatch', 'dispatchSync'], true)) {
                     $arg = $node->args[0] ?? null;

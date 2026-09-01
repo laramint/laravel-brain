@@ -2,6 +2,12 @@
 
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 
+/** A tracer with chain and batch detection switched off, as the config flag does. */
+function tracerWithoutJobGroups(): MethodTracer
+{
+    return new MethodTracer(detectJobGroups: false);
+}
+
 /** Trace one method of the job-groups fixture and hand back the tracer with it. */
 function traceShipments(MethodTracer $tracer, string $method): array
 {
@@ -129,4 +135,37 @@ it('still reads the chain and batch forms of the older Bus fixture', function ()
         'App\Services\BusDispatcher::dispatchAll#chain0',
         'App\Services\BusDispatcher::dispatchAll#batch0',
     ]);
+});
+
+it('reads no chain at all when the feature is switched off', function () {
+    $tracer = tracerWithoutJobGroups();
+    $edges = traceShipments($tracer, 'chainThroughTheFacade');
+
+    expect($tracer->jobGroups)->toBe([]);
+
+    // The jobs are still on the graph. Switching a boundary off is a statement about what is
+    // drawn around the work, not about whether the work happens.
+    expect(array_map(fn ($edge) => $edge->calleeFqcn, array_filter($edges, fn ($edge) => $edge->type === 'job')))
+        ->toBe(['App\Jobs\ChargeOrder', 'App\Jobs\NotifyWarehouse']);
+});
+
+it('reads no batch either, and still says when an entry could not be read', function () {
+    $tracer = tracerWithoutJobGroups();
+    $edges = traceShipments($tracer, 'chainWithAnEntryNobodyCanRead');
+
+    expect($tracer->jobGroups)->toBe([]);
+    expect(array_map(fn ($edge) => $edge->calleeFqcn, array_filter($edges, fn ($edge) => $edge->type === 'job')))
+        ->toBe(['App\Jobs\NotifyWarehouse']);
+    expect($tracer->unresolvedDispatchers())
+        ->toContain('App\Services\ShipmentDispatcher::chainWithAnEntryNobodyCanRead');
+});
+
+it('leaves withChain unread when the feature is off, as it was before the feature', function () {
+    // `withChain` is not a dispatch verb, so nothing outside the group detector has ever looked
+    // at it. Off, that form goes back to being invisible — which is what the switch promises.
+    $tracer = tracerWithoutJobGroups();
+    $edges = traceShipments($tracer, 'chainOnTheJobItself');
+
+    expect($tracer->jobGroups)->toBe([]);
+    expect(array_filter($edges, fn ($edge) => $edge->type === 'job'))->toBe([]);
 });
