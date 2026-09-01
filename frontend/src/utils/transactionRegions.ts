@@ -12,6 +12,8 @@ import type { LayoutNode } from './graphLayoutD3'
  */
 export interface TransactionRegion {
   id: string
+  /** 1-based, stable across renders: what the label says and how a reader tells two apart. */
+  index: number
   /** Padded convex hull, in graph coordinates, ready for an SVG polygon. */
   points: [number, number][]
   members: LayoutNode[]
@@ -102,6 +104,10 @@ export function transactionRegions(nodes: LayoutNode[], padding = 22): Transacti
 
   const regions: TransactionRegion[] = []
 
+  // Numbered by id rather than by discovery order, so a region keeps its number when the layout
+  // changes or a node is dragged — a label that renumbers itself is a label nobody can refer to.
+  const numbering = new Map([...groups.keys()].sort().map((id, i) => [id, i + 1]))
+
   for (const [id, members] of groups) {
     const points = inflate(hull(members.flatMap(corners)), padding)
 
@@ -118,6 +124,7 @@ export function transactionRegions(nodes: LayoutNode[], padding = 22): Transacti
 
     regions.push({
       id,
+      index: numbering.get(id) ?? 1,
       points,
       members,
       kind: members.some((m) => (m.data as { inRollback?: unknown } | undefined)?.inRollback)

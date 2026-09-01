@@ -452,6 +452,10 @@ export function GraphView({
   // is worse than no boundary — it keeps claiming a membership that is no longer on screen.
   const transactionAreas = useMemo(() => transactionRegions(effectiveNodes), [effectiveNodes])
 
+  // Toggled from the same footer as the node types: a boundary is one more thing on the canvas,
+  // and anything on the canvas should be something a reader can turn off.
+  const showTransactions = visibleTypes.has('transaction')
+
   const effectiveNodeById = useMemo(
     () => new Map(effectiveNodes.map((n) => [n.id, n])),
     [effectiveNodes],
@@ -1150,43 +1154,59 @@ export function GraphView({
             style={{ pointerEvents: 'all' }}
           />
           {/* Transaction regions, under the edges and the cards: a boundary is context, and
-              context that draws over the thing it describes stops being context. */}
-          {transactionAreas.map((region) => {
+              context that draws over the thing it describes stops being context.
+
+              Members are ALWAYS outlined and the hull is an addition, never a replacement. The
+              hull can only be drawn when it encloses nothing that was not in the span, so tying
+              membership to it would make membership flicker — drag a node far enough and the
+              only mark saying "this was in a transaction" would vanish with the shape. */}
+          {showTransactions && transactionAreas.map((region) => {
             const stroke = region.kind === 'rollback' ? ROLLBACK_FRAME : TRANSACTION_FRAME
             const dash = region.kind === 'rollback' ? '2 4' : '6 5'
-
-            // An impure region encloses a node that was never in the transaction, so the shape
-            // alone would claim something untrue. Each member is outlined instead, and the hull
-            // is dropped rather than drawn with a caveat nobody would read.
-            if (!region.pure) {
-              return (
-                <g key={region.id} style={{ pointerEvents: 'none' }}>
-                  {region.members.map((m) => (
-                    <rect key={m.id}
-                      x={m.x - m.width / 2 - 5} y={m.y - m.height / 2 - 5}
-                      width={m.width + 10} height={m.height + 10} rx={13}
-                      fill="none" stroke={stroke} strokeWidth={1.5}
-                      strokeDasharray={dash} opacity={0.8} />
-                  ))}
-                </g>
-              )
-            }
+            const name = `${region.kind === 'rollback' ? 'rollback' : 'transaction'} ${region.index}`
 
             return (
               <g key={region.id} style={{ pointerEvents: 'none' }}>
-                <polygon
-                  points={region.points.map(([x, y]) => `${x},${y}`).join(' ')}
-                  fill={stroke} fillOpacity={0.05}
-                  stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} opacity={0.8}
-                />
-                <text
-                  x={Math.min(...region.points.map(([x]) => x)) + 10}
-                  y={Math.min(...region.points.map(([, y]) => y)) - 6}
-                  fontSize={10} fontFamily="ui-monospace, monospace"
-                  fill={stroke} opacity={0.9}
-                >
-                  {region.kind === 'rollback' ? 'rollback' : 'transaction'}
-                </text>
+                {region.pure && (
+                  <polygon
+                    points={region.points.map(([x, y]) => `${x},${y}`).join(' ')}
+                    fill={stroke} fillOpacity={0.05}
+                    stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} opacity={0.55}
+                  />
+                )}
+
+                {region.members.map((m) => (
+                  <rect key={m.id}
+                    x={m.x - m.width / 2 - 5} y={m.y - m.height / 2 - 5}
+                    width={m.width + 10} height={m.height + 10} rx={13}
+                    fill="none" stroke={stroke} strokeWidth={1.5}
+                    strokeDasharray={dash} opacity={0.85} />
+                ))}
+
+                {/* The name goes wherever it can be read as belonging to something. On the hull
+                    once, because the shape already groups the members. Without a hull the members
+                    are only outlines scattered across the canvas, and one floating label beside
+                    the topmost of them names nothing — so each carries its own. */}
+                {region.pure ? (
+                  <text
+                    x={Math.min(...region.points.map(([x]) => x)) + 10}
+                    y={Math.min(...region.points.map(([, y]) => y)) - 6}
+                    fontSize={10} fontFamily="ui-monospace, monospace"
+                    fill={stroke} opacity={0.9}
+                  >
+                    {name}
+                  </text>
+                ) : (
+                  region.members.map((m) => (
+                    <text key={`${m.id}-label`}
+                      x={m.x - m.width / 2 - 4} y={m.y - m.height / 2 - 10}
+                      fontSize={9} fontFamily="ui-monospace, monospace"
+                      fill={stroke} opacity={0.85}
+                    >
+                      {name}
+                    </text>
+                  ))
+                )}
               </g>
             )
           })}
@@ -1601,6 +1621,19 @@ export function GraphView({
             {i < arr.length - 1 && <span className="g-crumb-arrow">→</span>}
           </span>
         ))}
+
+        {/* Listed only where there is one to see, and after a separator rather than an arrow:
+            the chain above is a sequence a request passes through, and a transaction is not a
+            step in it. Joining it with an arrow would say it comes after the implementation. */}
+        {showTransactions && transactionAreas.length > 0 && (
+          <span className="g-crumb g-crumb--aside">
+            <span className="g-crumb-sep">·</span>
+            <span className="g-crumb-dot g-crumb-dot--dashed" style={{ borderColor: TRANSACTION_FRAME }} />
+            {transactionAreas.length === 1
+              ? 'transaction'
+              : `${transactionAreas.length} transactions`}
+          </span>
+        )}
       </div>
 
       <div className="g-zoom">

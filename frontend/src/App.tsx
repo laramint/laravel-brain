@@ -19,6 +19,15 @@ const ALL_TYPES: GraphNode['type'][] = [
   'filament_panel', 'filament_resource', 'filament_page', 'filament_page_method', 'filament_widget', 'filament_relation_manager',
 ]
 
+/**
+ * Everything the footer can switch off, including the one entry that is not a node type.
+ *
+ * `transaction` is the boundary drawn around work that shares one; it belongs in the default set
+ * so the region is visible without being asked for, and in the same set so it can be switched off
+ * from the same place as everything else.
+ */
+const ALL_TOGGLEABLE: string[] = [...ALL_TYPES, 'transaction']
+
 // Node types that should have their methods expanded on first click
 
 export default function App() {
@@ -34,7 +43,7 @@ export default function App() {
   const [sidebarMode, setSidebarMode] = useState<'routes' | 'risks' | 'recent'>('routes')
   const [searchQuery, setSearchQuery] = useState('')
   const [pendingRouteSelect, setPendingRouteSelect] = useState(false)
-  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(ALL_TYPES))
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(ALL_TOGGLEABLE))
   const [rankDir, setRankDir] = useState<'LR' | 'TB'>('TB')
   const [stressTestNodeId, setStressTestNodeId] = useState<string | null>(null)
   const [stressRunKey, setStressRunKey] = useState(0)
@@ -75,7 +84,7 @@ export default function App() {
   if (tabState.data !== prevTabData) {
     setPrevTabData(tabState.data)
     if (tabState.data) {
-      setVisibleTypes(new Set(ALL_TYPES))
+      setVisibleTypes(new Set(ALL_TOGGLEABLE))
       // When the load came from picking a route/risk/recent card, focus its
       // route node so the graph + inspector jump to it.
       if (pendingRouteSelect) {
@@ -129,10 +138,24 @@ export default function App() {
 
   const typeCounts = useMemo(() => {
     if (!tabState.data) return {} as Record<string, number>
-    return tabState.data.nodes.reduce<Record<string, number>>((acc, n) => {
+
+    const counts = tabState.data.nodes.reduce<Record<string, number>>((acc, n) => {
       acc[n.type] = (acc[n.type] ?? 0) + 1
       return acc
     }, {})
+
+    // Transactions are not a kind of node, so they are counted by how many DISTINCT spans the
+    // canvas holds rather than by how many nodes sit in one. Listed alongside the node types
+    // because from the reader's side it is the same question — is this on the graph or not.
+    const spans = new Set(
+      tabState.data.nodes
+        .map((n) => (n.data as { transactionId?: unknown } | undefined)?.transactionId)
+        .filter((id): id is string => typeof id === 'string' && id !== '')
+    )
+
+    if (spans.size > 0) counts.transaction = spans.size
+
+    return counts
   }, [tabState.data])
 
   const visibleNodeCount = useMemo(() => {
@@ -152,7 +175,7 @@ export default function App() {
     })
   }, [])
 
-  const onShowAll = useCallback(() => setVisibleTypes(new Set(ALL_TYPES)), [])
+  const onShowAll = useCallback(() => setVisibleTypes(new Set(ALL_TOGGLEABLE)), [])
   const onHideAll = useCallback(() => setVisibleTypes(new Set()), [])
 
   const [scanning, setScanning] = useState(false)
