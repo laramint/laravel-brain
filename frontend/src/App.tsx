@@ -19,6 +19,10 @@ const ALL_TYPES: GraphNode['type'][] = [
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
   'ai_agent', 'ai_tool',
   'filament_panel', 'filament_resource', 'filament_page', 'filament_page_method', 'filament_widget', 'filament_relation_manager',
+  // The inventory's own kinds. Membership here is what makes a type filterable at all, and
+  // `edgeVisible` reads it too — a type left out has no visible edges, so folding a group
+  // finds no children to fold.
+  'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
 ]
 
 /**

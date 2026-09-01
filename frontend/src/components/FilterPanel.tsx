@@ -38,6 +38,10 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   filament_page_method: 'F. Methods',
   filament_widget: 'F. Widgets',
   filament_relation_manager: 'F. Relations',
+  entry_point: 'Entry points',
+  entry_point_group: 'Entry groups',
+  unreached_class: 'Not reached',
+  unreached_group: 'Unreached groups',
 }
 
 // Stable order matching App.tsx ALL_TYPES
@@ -48,6 +52,7 @@ const ORDER: GraphNode['type'][] = [
   'service_provider', 'facade', 'ai_agent', 'ai_tool',
   'filament_panel', 'filament_resource', 'filament_page',
   'filament_page_method', 'filament_widget', 'filament_relation_manager',
+  'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
 ]
 
 /**

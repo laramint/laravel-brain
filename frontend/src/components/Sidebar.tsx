@@ -26,6 +26,10 @@ interface Props {
 }
 
 const TYPE_COLORS: Record<string, string> = {
+  entry_point:       '#22D3EE',
+  entry_point_group: '#0E7490',
+  unreached_class:   '#94A3B8',
+  unreached_group:   '#475569',
   route:      '#4CAF50',
   middleware: '#FF9800',
   controller: '#2196F3',
