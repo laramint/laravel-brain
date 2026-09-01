@@ -107,6 +107,9 @@ class GraphBuilder
     /** @var string[] class-file search roots, relative to the project root */
     private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
 
+    /** Whether cache operations are detected and attached at all — see setCacheOperationsEnabled(). */
+    private bool $cacheOperationsEnabled = true;
+
     private ?ContainerBindingRegistry $bindingRegistry = null;
 
     private ?FacadeRegistry $facadeRegistry = null;
@@ -155,6 +158,19 @@ class GraphBuilder
         if ($paths !== []) {
             $this->viewPaths = $paths;
         }
+    }
+
+    /**
+     * Turn cache-operation detection on or off for the whole build.
+     *
+     * Off is off at the source: FlowExtractor drops its detector, so no statement is inspected
+     * for a cache call and the pass below has nothing to walk. It is not a filter over results
+     * that were computed anyway — a project that does not want the feature pays nothing for it.
+     */
+    public function setCacheOperationsEnabled(bool $enabled): void
+    {
+        $this->cacheOperationsEnabled = $enabled;
+        $this->flowExtractor->setCacheOperationsEnabled($enabled);
     }
 
     /**
@@ -663,15 +679,17 @@ class GraphBuilder
         // service's `Cache::forget()` upwards to every action above it would put the same key on
         // a dozen panels and lose the one method actually responsible for clearing it — and the
         // graph edges already lead there.
-        foreach ($this->graph->nodes() as $node) {
-            $steps = $node->data['flowSteps'] ?? null;
-            if (! is_array($steps) || $steps === []) {
-                continue;
-            }
+        if ($this->cacheOperationsEnabled) {
+            foreach ($this->graph->nodes() as $node) {
+                $steps = $node->data['flowSteps'] ?? null;
+                if (! is_array($steps) || $steps === []) {
+                    continue;
+                }
 
-            $cacheOps = $this->collectCacheOps($steps);
-            if ($cacheOps !== []) {
-                $this->graph->updateNodeData($node->id, array_merge($node->data, ['cacheOps' => $cacheOps]));
+                $cacheOps = $this->collectCacheOps($steps);
+                if ($cacheOps !== []) {
+                    $this->graph->updateNodeData($node->id, array_merge($node->data, ['cacheOps' => $cacheOps]));
+                }
             }
         }
 

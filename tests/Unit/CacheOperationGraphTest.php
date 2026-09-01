@@ -7,17 +7,30 @@ use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Graph\Graph;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
 
-function cacheProjectGraph(): Graph
+/**
+ * The cache-project fixture built into a graph.
+ *
+ * `$enabled` of null leaves the builder alone, which is the position that proves the default —
+ * calling the setter with `true` would pass even if the default were off.
+ */
+function cacheProjectGraph(?bool $enabled = null): Graph
 {
-    static $graph = null;
+    static $graphs = [];
 
-    if ($graph === null) {
+    $key = $enabled === null ? 'default' : ($enabled ? 'on' : 'off');
+
+    if (! isset($graphs[$key])) {
         $root = fixture('cache-project');
         $routes = (new RouteAnalyzer)->analyze($root);
         $controllers = (new ControllerAnalyzer)->analyze($root, $routes);
         $traces = (new MethodTracer)->trace($controllers);
 
-        $graph = (new GraphBuilder)->build(
+        $builder = new GraphBuilder;
+        if ($enabled !== null) {
+            $builder->setCacheOperationsEnabled($enabled);
+        }
+
+        $graphs[$key] = $builder->build(
             'cache-project',
             $routes,
             new MiddlewareRegistry([], [], []),
@@ -28,7 +41,7 @@ function cacheProjectGraph(): Graph
         );
     }
 
-    return $graph;
+    return $graphs[$key];
 }
 
 /** @return array[] the cacheOps of the node whose id ends in $suffix */
@@ -110,4 +123,69 @@ it('survives the round trip through the graph JSON', function () {
             expect($operation)->toHaveKeys(['kind', 'method', 'key', 'keyKind', 'store', 'tags', 'ttl']);
         }
     }
+});
+
+it('detects cache operations by default, with nobody asking for them', function () {
+    // The default position, exercised without touching the setter — calling it with `true`
+    // would pass just as well if the default had been flipped to off.
+    expect(cacheOpsOf('DashboardController::refresh'))->not->toBeEmpty();
+});
+
+it('attaches nothing anywhere once the feature is switched off', function () {
+    $nodesWithOps = array_filter(
+        cacheProjectGraph(enabled: false)->nodes(),
+        fn ($node) => isset($node->data['cacheOps']),
+    );
+
+    expect($nodesWithOps)->toBeEmpty();
+});
+
+it('switched off means the detection never ran, not that its answers were dropped', function () {
+    // The distinction the switch exists for. If it only filtered the collector's output, the
+    // flow steps would still be carrying a `cache` payload on every cache call — the detection
+    // would have happened and been paid for, and the switch would be a lie about cost.
+    $carriers = [];
+
+    $walk = function (array $steps) use (&$walk, &$carriers): void {
+        foreach ($steps as $step) {
+            if (isset($step['cache'])) {
+                $carriers[] = $step['label'] ?? '?';
+            }
+            foreach (['then', 'else', 'body'] as $branch) {
+                if (isset($step[$branch]) && is_array($step[$branch])) {
+                    $walk($step[$branch]);
+                }
+            }
+        }
+    };
+
+    foreach (cacheProjectGraph(enabled: false)->nodes() as $node) {
+        $walk($node->data['flowSteps'] ?? []);
+    }
+
+    expect($carriers)->toBeEmpty();
+
+    // A negative control: the same walk over the on graph finds them, so an empty result above
+    // means the switch worked rather than that the walk looks in the wrong place.
+    $carriers = [];
+    foreach (cacheProjectGraph(enabled: true)->nodes() as $node) {
+        $walk($node->data['flowSteps'] ?? []);
+    }
+
+    expect($carriers)->not->toBeEmpty();
+});
+
+it('charts the same flow either way, minus the cache typing', function () {
+    // The switch turns a feature off; it must not quietly change what else the chart says.
+    $stepCount = function (Graph $graph): int {
+        $total = 0;
+        foreach ($graph->nodes() as $node) {
+            $total += count($node->data['flowSteps'] ?? []);
+        }
+
+        return $total;
+    };
+
+    expect($stepCount(cacheProjectGraph(enabled: false)))
+        ->toBe($stepCount(cacheProjectGraph(enabled: true)));
 });

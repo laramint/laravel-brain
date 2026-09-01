@@ -6,8 +6,13 @@ use PhpParser\Node;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitorAbstract;
 
-/** Flow steps for the first method of a class written inline. */
-function flowFor(string $body, bool $relationsAutoloaded = false): array
+/**
+ * Flow steps for the first method of a class written inline.
+ *
+ * `$cacheOperations` of null leaves the extractor alone, so the calls that pass nothing are
+ * exercising the default rather than a position this helper chose for them.
+ */
+function flowFor(string $body, bool $relationsAutoloaded = false, ?bool $cacheOperations = null): array
 {
     $parsed = (new PhpFileParser)->parseCode(<<<PHP
         <?php
@@ -40,7 +45,16 @@ function flowFor(string $body, bool $relationsAutoloaded = false): array
     });
     $traverser->traverse($parsed['ast'] ?? []);
 
-    return $found === null ? [] : (new FlowExtractor($relationsAutoloaded))->extract($found, $parsed['useMap'] ?? []);
+    if ($found === null) {
+        return [];
+    }
+
+    $extractor = new FlowExtractor($relationsAutoloaded);
+    if ($cacheOperations !== null) {
+        $extractor->setCacheOperationsEnabled($cacheOperations);
+    }
+
+    return $extractor->extract($found, $parsed['useMap'] ?? []);
 }
 
 it('shows the work inside a DB::transaction, not just the wrapper', function () {
@@ -291,4 +305,32 @@ it('leaves a step that touches no cache without a cache key', function () {
     $steps = flowFor('        $this->payer->charge();');
 
     expect($steps[0])->not->toHaveKey('cache');
+});
+
+it('detects cache operations without being asked to', function () {
+    // The default, reached without touching the setter: passing `true` would pass here even if
+    // the default had been flipped.
+    expect(flowFor('        \Cache::forget("users.index");')[0])->toHaveKey('cache');
+});
+
+it('does not look for a cache call at all once detection is off', function () {
+    // Off has to mean the step never carries a payload, not that something downstream drops it —
+    // that is the difference between the switch saving work and the switch merely hiding output.
+    $steps = flowFor('        \Cache::forget("users.index");', cacheOperations: false);
+
+    expect($steps[0])->not->toHaveKey('cache')
+        ->and($steps[0]['type'])->toBe('call');
+});
+
+it('charts the same steps with detection off, minus the cache typing', function () {
+    $on = flowFor('        $users = \Cache::get("users.index");
+        $this->payer->charge();
+        return $users;');
+    $off = flowFor('        $users = \Cache::get("users.index");
+        $this->payer->charge();
+        return $users;', cacheOperations: false);
+
+    expect(array_column($off, 'label'))->toBe(array_column($on, 'label'))
+        ->and(array_column($off, 'type'))->toBe(['assign', 'call', 'return'])
+        ->and(array_column($on, 'type'))->toBe(['cache', 'call', 'return']);
 });

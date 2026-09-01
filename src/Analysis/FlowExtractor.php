@@ -26,7 +26,8 @@ class FlowExtractor
 {
     private PrettyPrinter $printer;
 
-    private CacheOperationDetector $cacheDetector;
+    /** Null when cache-operation detection is off, so the work is never started. */
+    private ?CacheOperationDetector $cacheDetector;
 
     private array $useMap;
 
@@ -50,6 +51,19 @@ class FlowExtractor
         $this->printer = new PrettyPrinter;
         $this->cacheDetector = new CacheOperationDetector;
         $this->useMap = [];
+    }
+
+    /**
+     * Turn cache-operation detection on or off.
+     *
+     * Off drops the detector rather than discarding its answers, so a project that does not want
+     * the feature does not pay for it: {@see markCacheOperation()} and {@see tagCacheOperation()}
+     * are on the path of every statement charted, and each one otherwise inspects the expression
+     * and can reach the pretty printer to render a key.
+     */
+    public function setCacheOperationsEnabled(bool $enabled): void
+    {
+        $this->cacheDetector = $enabled ? ($this->cacheDetector ?? new CacheOperationDetector) : null;
     }
 
     /**
@@ -397,6 +411,10 @@ class FlowExtractor
      */
     private function markCacheOperation(array $step, Node\Expr $expr): array
     {
+        if ($this->cacheDetector === null) {
+            return $step;
+        }
+
         $operation = $this->cacheDetector->detect($expr, $this->useMap);
 
         return $operation === null ? $step : ['type' => 'cache'] + $step + ['cache' => $operation->toArray()];
@@ -413,6 +431,10 @@ class FlowExtractor
      */
     private function tagCacheOperation(array $step, Node\Expr $expr): array
     {
+        if ($this->cacheDetector === null) {
+            return $step;
+        }
+
         $operation = $this->cacheDetector->detect($expr, $this->useMap);
 
         return $operation === null ? $step : $step + ['cache' => $operation->toArray()];
