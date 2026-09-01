@@ -83,6 +83,33 @@ From each controller action (and Filament page method), the tracer follows:
 
 This produces the full edge list used to build the graph.
 
+## Outgoing HTTP
+
+Every method charted as a flow is also read for calls that leave the application, and any node that
+makes one lists them in the inspector under **Outgoing HTTP** and carries a 🌐 marker on the canvas.
+Four shapes are recognised:
+
+- **Laravel's client** — `Http::get(...)` and the builder around it, so
+  `Http::withToken($t)->retry(3, 100)->timeout(5)->post($url)` reports one POST with its retry and
+  its timeout. A pending request parked in a variable is followed, and `Http::pool(...)` is reported
+  as the one concurrent call it is.
+- **Guzzle** — `new Client([...])` and its verbs, including the `…Async` ones, when the client is
+  constructed in the same method (inline, in a variable, or on `$this->…`). A client injected
+  through the constructor cannot be seen from a single method and is not reported.
+- **curl** — `curl_exec()`, carrying the URL, verb and timeout its handle was given earlier.
+- **`file_get_contents()`** — only when the argument visibly starts with `http://` or `https://`;
+  a computed argument is much more often a path on disk, and a wrong "this calls a third party"
+  costs more than a missing one.
+
+The address is reported as precisely as the source allows, and never more so. A literal URL is shown
+as written; `'https://api.stripe.com/v1/charges/'.$id` keeps its readable prefix and is marked
+*partly computed*; `config('services.allegro.url')` is shown as that key, which names the
+integration as well as the URL would; anything else says the address is computed at runtime rather
+than guessing.
+
+Declared timeouts and retries are shown, and so is their absence — a request with no timeout waits
+as long as the third party takes, which is worth seeing before an incident rather than during one.
+
 ## Blade views
 
 Templates are scanned to link a view to the views it `@include`s or renders as a component, and a view name is resolved back to its file the same way. Both read the same list, so an application that keeps templates in packages points them there once:

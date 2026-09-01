@@ -293,6 +293,21 @@ class ContextExporter
         if (! empty($allCacheOps)) {
             $parts[] = '## Cache Operations';
             $parts[] = implode("\n", $allCacheOps);
+                $parts[] = '';
+            }
+
+        // Outgoing HTTP. Sits beside the database section because it answers the same kind of
+        // question — what does this code path touch that it does not own — and because an agent
+        // reading this export to change a method needs to know the method leaves the process.
+        $allHttp = [];
+        foreach ($ctx->nodes as $node) {
+            foreach (($node['data']['httpCalls'] ?? []) as $call) {
+                $allHttp[] = '- '.$this->describeHttpCall($call)." (via {$node['label']})";
+            }
+        }
+        if (! empty($allHttp)) {
+            $parts[] = '## Outgoing HTTP';
+            $parts[] = implode("\n", $allHttp);
             $parts[] = '';
         }
 
@@ -593,6 +608,45 @@ class ContextExporter
         }
 
         return $line;
+    }
+
+    /**
+     * One outgoing request as a line of prose: method, where it goes, and what it does when the
+     * far end is slow. An unreadable address is written as such rather than omitted — "we cannot
+     * see where this goes" is information, and a blank would read as "it goes nowhere".
+     *
+     * @param  array<string, mixed>  $call
+     */
+    private function describeHttpCall(array $call): string
+    {
+        $method = is_string($call['method'] ?? null) && $call['method'] !== '' ? $call['method'] : 'REQUEST';
+        $url = is_string($call['url'] ?? null) ? $call['url'] : '';
+        $configKey = is_string($call['configKey'] ?? null) ? $call['configKey'] : '';
+        $source = is_string($call['urlSource'] ?? null) ? $call['urlSource'] : 'dynamic';
+
+        $target = match (true) {
+            $configKey !== '' => "config('{$configKey}'){$url}",
+            $url !== '' => $url,
+            default => 'URL computed at runtime',
+        };
+
+        $notes = [];
+        if ($source === 'constructed') {
+            $notes[] = 'URL partly computed';
+        }
+        $notes[] = isset($call['timeout']) && is_numeric($call['timeout'])
+            ? 'timeout '.$call['timeout'].'s'
+            : 'no timeout declared';
+        if (isset($call['retryTimes']) && is_numeric($call['retryTimes'])) {
+            $notes[] = 'retry '.$call['retryTimes'].'×';
+        }
+        if (($call['async'] ?? false) === true) {
+            $notes[] = 'async';
+        }
+
+        $client = is_string($call['client'] ?? null) ? $call['client'] : 'http';
+
+        return "{$method} {$target} [{$client}: ".implode(', ', $notes).']';
     }
 
     // ── Call chain builder ────────────────────────────────────────────────────

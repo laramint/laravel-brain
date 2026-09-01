@@ -21,6 +21,11 @@ use PhpParser\PrettyPrinter\Standard as PrettyPrinter;
  *   { type: 'assign',   label: string }
  *   { type: 'throw',    label: string }
  *   { type: 'comment',  label: string }
+ *
+ * A step that makes an outgoing HTTP request also carries { http: HttpCall[] } — the same shape
+ * `n1` has, and for the same reason: the fact belongs to the statement that causes it, so the
+ * chart can mark that statement and the graph can collect the whole method's calls by walking the
+ * steps it already built.
  */
 class FlowExtractor
 {
@@ -46,11 +51,14 @@ class FlowExtractor
      * @param  bool  $relationsAutoloaded  Whether the application batches relation access, which
      *                                     makes a relation read inside a loop not an N+1 at all.
      */
+    private HttpCallExtractor $httpCalls;
+
     public function __construct(private readonly bool $relationsAutoloaded = false)
     {
         $this->printer = new PrettyPrinter;
         $this->cacheDetector = new CacheOperationDetector;
         $this->useMap = [];
+        $this->httpCalls = new HttpCallExtractor;
     }
 
     /**
@@ -74,6 +82,7 @@ class FlowExtractor
     public function extract(Node\Stmt\ClassMethod $method, array $useMap = []): array
     {
         $this->useMap = $useMap;
+        $this->httpCalls->reset($useMap);
 
         return $this->stmtsToSteps($method->stmts ?? []);
     }
@@ -89,6 +98,7 @@ class FlowExtractor
         array $useMap = [],
     ): array {
         $this->useMap = $useMap;
+        $this->httpCalls->reset($useMap);
 
         if ($closure instanceof Node\Expr\ArrowFunction) {
             // Arrow functions have a single expression body, no statement list
@@ -222,6 +232,74 @@ class FlowExtractor
     }
 
     private function stmtToStep(Node\Stmt $stmt, bool $inLoop = false): ?array
+    {
+        $step = $this->buildStep($stmt, $inLoop);
+
+        return $step === null ? null : $this->withHttpCalls($step, $stmt);
+    }
+
+    /**
+     * Record the outgoing HTTP requests a statement makes on the step it became.
+     *
+     * Only the expressions the statement owns are read — its condition, the thing it iterates,
+     * the expression it is — never the statements nested inside it, because each of those becomes
+     * a step of its own and is scanned when it does. Scanning both would report one request twice.
+     *
+     * The same reasoning decides whether to look inside closures, one statement at a time. A call
+     * statement whose callback was charted (`retry(3, fn () => Http::get(...));`, which came back
+     * with a `body`) has its requests reported by those steps; the identical expression assigned
+     * to a variable is charted as a bare `assign`, nothing descends into it, and this is the only
+     * place its request can be seen.
+     *
+     * The consequence worth knowing: a statement shape the chart does not draw at all (a `switch`
+     * subject, an `elseif` condition, `$client?->get()` — a nullsafe call, which produces no step)
+     * has nowhere to hang a call and so does not report one. The chart's vocabulary is the limit,
+     * which is the trade for hanging the fact on the exact statement that causes it.
+     */
+    private function withHttpCalls(array $step, Node\Stmt $stmt): array
+    {
+        $charted = $stmt instanceof Node\Stmt\Expression && isset($step['body']);
+
+        $calls = [];
+        foreach ($this->ownExpressions($stmt) as $expr) {
+            foreach ($this->httpCalls->fromExpression($expr, ! $charted) as $call) {
+                $calls[] = $call->toArray();
+            }
+        }
+
+        return $calls === [] ? $step : $step + ['http' => $calls];
+    }
+
+    /**
+     * The expressions a statement evaluates itself, as opposed to those inside its body.
+     *
+     * @return Node\Expr[]
+     */
+    private function ownExpressions(Node\Stmt $stmt): array
+    {
+        if ($stmt instanceof Node\Stmt\Expression) {
+            return [$stmt->expr];
+        }
+        if ($stmt instanceof Node\Stmt\Return_) {
+            return $stmt->expr !== null ? [$stmt->expr] : [];
+        }
+        if ($stmt instanceof Node\Stmt\If_) {
+            return [$stmt->cond];
+        }
+        if ($stmt instanceof Node\Stmt\Foreach_) {
+            return [$stmt->expr];
+        }
+        if ($stmt instanceof Node\Stmt\While_) {
+            return [$stmt->cond];
+        }
+        if ($stmt instanceof Node\Stmt\For_) {
+            return array_merge($stmt->init, $stmt->cond, $stmt->loop);
+        }
+
+        return [];
+    }
+
+    private function buildStep(Node\Stmt $stmt, bool $inLoop = false): ?array
     {
         // return $something;
         if ($stmt instanceof Node\Stmt\Return_) {

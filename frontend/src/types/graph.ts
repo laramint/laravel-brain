@@ -24,6 +24,29 @@ export interface CacheOperation {
   ttl: number | null
 }
 
+/**
+ * One outgoing request to something outside the application.
+ *
+ * Every field may say "unknown": `url` and `host` are empty when the address is computed at
+ * runtime, `method` is empty when the source does not name one (a Guzzle `send($request)`, a
+ * `curl_exec` with no verb set), and `timeout` / `retryTimes` are null when the code declares
+ * neither — which is a fact about the call, not a gap in the data. `urlSource` says how much the
+ * scanner could actually read, and `configKey` names the config entry when the address comes from
+ * one, because `services.allegro.url` identifies the third party as well as its URL would.
+ */
+export interface HttpCall {
+  client: 'laravel' | 'guzzle' | 'curl' | 'stream'
+  method: string
+  url: string
+  host: string
+  urlSource: 'literal' | 'constructed' | 'config' | 'env' | 'dynamic'
+  configKey: string
+  timeout: number | null
+  retryTimes: number | null
+  retrySleep: number | null
+  async: boolean
+}
+
 export interface FlowStep {
   type: 'call' | 'assign' | 'return' | 'throw' | 'if' | 'loop' | 'dispatch' | 'event' | 'cache'
   label: string
@@ -33,6 +56,7 @@ export interface FlowStep {
   n1?: boolean
   /** Present on any step whose expression talks to the cache, whatever its `type` ended up as. */
   cache?: CacheOperation
+  http?: HttpCall[]
 }
 
 export interface GraphMeta {

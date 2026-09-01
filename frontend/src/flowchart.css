@@ -240,3 +240,25 @@
 .sequence-modal-body .seq-diagram-root {
   padding: 16px;
 }
+
+/* ── Outgoing HTTP ────────────────────────────────── */
+/* Marks the step that leaves the process. Deliberately calm, not alarmed: an outgoing call is a
+   fact about the code, not a defect, and it sits right beside the N+1 warning, which is one. */
+.flowchart-http {
+  margin-left: auto;
+  padding: 1px 6px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+  color: #7dd3fc;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
