@@ -23,5 +23,9 @@ class CallChainEdge
         public string $type,
         /** 'public' | 'protected' | 'private' */
         public string $visibility = 'public',
+        /** The call was made inside a database transaction. */
+        public bool $inTransaction = false,
+        /** The call is on the compensation path — it runs only after a rollback. */
+        public bool $inRollback = false,
     ) {}
 }

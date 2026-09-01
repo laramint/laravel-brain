@@ -15,6 +15,8 @@ import {
   SECURITY_EXPOSURE_COLORS,
   SECURITY_EXPOSURE_COLORS_LIGHT,
   SECURITY_RISK_COLORS,
+  TRANSACTION_FRAME,
+  ROLLBACK_FRAME,
 } from '../utils/graphConstants'
 import {
   type LayoutEdge,
@@ -1260,6 +1262,22 @@ export function GraphView({
                 {selected && (
                   <rect x={-hw - 3} y={-hh - 3} width={w + 6} height={h + 6}
                     rx={compact ? 7 : 13} fill="none" stroke={accent} strokeWidth={6} opacity={0.15} />
+                )}
+
+                {/* A transaction is a span, not a step, so it is drawn as a frame around the work
+                    rather than as a node in the path — nothing here changes what calls what.
+                    Dashed because the boundary is a property of the run, not a thing on screen. */}
+                {Boolean(n.data.inTransaction) && (
+                  <rect x={-hw - 5} y={-hh - 5} width={w + 10} height={h + 10}
+                    rx={compact ? 9 : 15} fill="none"
+                    stroke={TRANSACTION_FRAME} strokeWidth={1.5} strokeDasharray="5 4"
+                    opacity={0.85} style={{ pointerEvents: 'none' }} />
+                )}
+                {Boolean(n.data.inRollback) && (
+                  <rect x={-hw - 5} y={-hh - 5} width={w + 10} height={h + 10}
+                    rx={compact ? 9 : 15} fill="none"
+                    stroke={ROLLBACK_FRAME} strokeWidth={1.5} strokeDasharray="2 3"
+                    opacity={0.85} style={{ pointerEvents: 'none' }} />
                 )}
 
                 {/* Card background */}

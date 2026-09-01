@@ -545,6 +545,10 @@ class ProjectAnalyzer
         gc_collect_cycles();
 
         $this->emit('step:start', ['step' => 'graph', 'label' => 'Building graph', 'message' => '  → Building graph...']);
+        // The tracer knows which methods opened a span; the builder knows which nodes those
+        // methods became. Handed over before the build so the flags land with the nodes.
+        $this->graphBuilder->setTransactionOpeners($this->methodTracer->transactionOpeners);
+
         $fullGraph = $this->graphBuilder->build(
             $projectName, $routes, $middlewareRegistry, $controllers, $callChain, $models, $projectRoot, $dbQueryMap, $bindingRegistry, $facadeRegistry, $securityMap,
         );

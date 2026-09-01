@@ -599,9 +599,27 @@ class GraphBuilder
             $edgeType = 'action-to-'.$calleeGraphType;
 
             $this->addEdge($callerNode, $calleeNode, $edgeLabel, $edgeType);
+
+            // A transaction is a span, not a step, so it is recorded as something true OF the
+            // work rather than as a node in the path. The callee is what runs inside; the caller
+            // is what opened it and generally outlives it.
+            if ($edge->inTransaction) {
+                $this->inTransactionNodes[$calleeNode] = true;
+            }
+            if ($edge->inRollback) {
+                $this->inRollbackNodes[$calleeNode] = true;
+            }
+
             $this->maybeWireContainerBinding($edge, $models);
             $this->maybeWireFacadeResolution($edge, $models);
         }
+
+        foreach (array_keys($this->transactionOpeners) as $key) {
+            [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
+            $this->inTransactionNodes[$this->nodeIdForHop($fqcn, $method)] = true;
+        }
+
+        $this->stampTransactionScopes();
 
         $this->supplementEnumAndInterfaceNodes($controllers, $callChain);
         $this->wireControllerInterfaceHints($routes, $controllers);
@@ -2186,6 +2204,54 @@ class GraphBuilder
         }
 
         return array_unique($resolved);
+    }
+
+    /**
+     * Methods that open a transaction, keyed `Fqcn::method`, as reported by the tracer.
+     *
+     * @var array<string, true>
+     */
+    private array $transactionOpeners = [];
+
+    /** @param array<string, true> $openers */
+    public function setTransactionOpeners(array $openers): void
+    {
+        $this->transactionOpeners = $openers;
+    }
+
+    /**
+     * Node ids that run inside a transaction, and those on a rollback path.
+     *
+     * @var array<string, true>
+     */
+    private array $inTransactionNodes = [];
+
+    /** @var array<string, true> */
+    private array $inRollbackNodes = [];
+
+    /**
+     * Write the two flags onto the nodes that earned them.
+     *
+     * Done in one pass after the chain is walked rather than as each edge is seen, because a
+     * node can be reached by several calls and the last write would otherwise decide: one call
+     * from inside a transaction is enough to make the flag true, and a later call from outside
+     * must not clear it.
+     */
+    private function stampTransactionScopes(): void
+    {
+        foreach ([$this->inTransactionNodes, $this->inRollbackNodes] as $index => $ids) {
+            $key = $index === 0 ? 'inTransaction' : 'inRollback';
+
+            foreach (array_keys($ids) as $id) {
+                $node = $this->graph->getNode($id);
+
+                if ($node === null) {
+                    continue;
+                }
+
+                $this->graph->updateNodeData($id, [...$node->data, $key => true]);
+            }
+        }
     }
 
     private function addEdge(string $source, string $target, string $label, string $type): void
