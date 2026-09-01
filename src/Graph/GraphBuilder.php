@@ -2611,6 +2611,9 @@ class GraphBuilder
                     'modifiers' => $entry->modifiers,
                     'timezone' => $entry->timezone,
                     'file' => $entry->file,
+                    // A closure task has nothing to link to, so its own body is the only thing
+                    // the tab can show. Omitted when empty rather than rendering an empty chart.
+                    ...($entry->flowSteps === [] ? [] : ['flowSteps' => $entry->flowSteps]),
                 ]));
             }
 

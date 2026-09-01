@@ -34,9 +34,23 @@ class ScheduleEntry
         public array $frequencyArguments = [],
         public array $modifiers = [],
         public string $timezone = '',
+        /**
+         * What a `Schedule::call(fn)` actually does.
+         *
+         * A closure task has no class to link to, so without this its tab is one node and
+         * nothing else — the only kind of scheduled work the viewer could say nothing about.
+         * The steps are read where the closure is already in hand rather than by re-parsing the
+         * file at a remembered line.
+         *
+         * @var array<int, array<string, mixed>>
+         */
+        public array $flowSteps = [],
     ) {}
 
-    public static function fromChain(string $type, string $target, string $file, ScheduleChain $chain): self
+    /**
+     * @param  array<int, array<string, mixed>>  $flowSteps
+     */
+    public static function fromChain(string $type, string $target, string $file, ScheduleChain $chain, array $flowSteps = []): self
     {
         return new self(
             type: $type,
@@ -46,6 +60,7 @@ class ScheduleEntry
             frequencyArguments: $chain->frequencyArguments,
             modifiers: $chain->modifiers,
             timezone: $chain->timezone,
+            flowSteps: $flowSteps,
         );
     }
 
@@ -89,6 +104,26 @@ class ScheduleEntry
 
 class ConsoleAnalyzer
 {
+    /**
+     * The steps inside a `Schedule::call(fn)`, read from the closure the registration was given.
+     *
+     * Shared by both visitors — the Schedule facade form and the kernel form — because a closure
+     * task is the one kind of scheduled work with no class behind it, and without this its tab
+     * shows a single node and nothing about what runs every minute.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function closureFlowSteps(?Node\Arg $arg): array
+    {
+        $closure = $arg?->value;
+
+        if (! $closure instanceof Node\Expr\Closure && ! $closure instanceof Node\Expr\ArrowFunction) {
+            return [];
+        }
+
+        return (new FlowExtractor)->extractFromClosure($closure);
+    }
+
     /**
      * Schedule methods that state a cadence.
      *
@@ -295,6 +330,7 @@ class ConsoleAnalyzer
                             $target,
                             $this->file,
                             $this->chains->for($node),
+                            ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
                         );
                     }
                 }
@@ -606,6 +642,7 @@ class ConsoleAnalyzer
                             $target,
                             $this->file,
                             $this->chains->for($node),
+                            ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
                         );
                     }
                 }

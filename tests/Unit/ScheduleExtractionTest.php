@@ -92,3 +92,26 @@ it('separates two runs of one command by their cadence arguments', function () {
 
     expect($morning->nodeId())->not->toBe($evening->nodeId());
 });
+
+it('reads the body of a scheduled closure, which has no class to read instead', function () {
+    // Every other kind of scheduled task points at a class the graph can chart. A closure points
+    // at nothing, so without its own body its tab is one node and silence — the only scheduled
+    // work the viewer could say nothing about.
+    $schedules = (new ConsoleAnalyzer)->analyze(fixture('scheduled-project'))['schedule'];
+
+    $closure = collect($schedules)->firstWhere('type', 'call');
+
+    expect($closure)->not->toBeNull()
+        ->and($closure->flowSteps)->not->toBeEmpty();
+
+    $labels = array_map(fn (array $step): string => (string) ($step['label'] ?? ''), $closure->flowSteps);
+
+    expect(implode(' ', $labels))->toContain('forget')
+        ->and(implode(' ', $labels))->toContain('foreach');
+});
+
+it('leaves a command task without a closure body rather than inventing one', function () {
+    $schedules = (new ConsoleAnalyzer)->analyze(fixture('scheduled-project'))['schedule'];
+
+    expect(collect($schedules)->firstWhere('type', 'command')->flowSteps)->toBe([]);
+});
