@@ -7,12 +7,11 @@ namespace LaraMint\LaravelBrain\Graph;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
 use LaraMint\LaravelBrain\Analysis\ConsoleCommandDefinition;
-use LaraMint\LaravelBrain\Analysis\EventDefinition;
+use LaraMint\LaravelBrain\Analysis\EventFacts;
 use LaraMint\LaravelBrain\Analysis\FilamentPageDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentPanelDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
-use LaraMint\LaravelBrain\Analysis\QueueDeferral;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
@@ -306,19 +305,19 @@ class GraphSplitter
      * "what does firing this set off" has no route to hang it on, and asking it a route at a time
      * is how a chain three listeners deep stays invisible.
      *
-     * @param  array<string, EventDefinition>  $events
      * @param  CallChainEdge[]  $listenerEdges  event → listener
      * @param  array<string, list<string>>  $firedBy  listener FQCN => events it dispatches
      * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
      */
     public function buildEventsTab(
-        array $events,
+        EventFacts $facts,
         array $listenerEdges,
         array $firedBy,
-        QueueDeferral $deferral,
         string $projectName,
         string $analyzedAt,
     ): ?array {
+        $events = $facts->events();
+
         if ($events === [] && $listenerEdges === []) {
             return null;
         }
@@ -326,16 +325,7 @@ class GraphSplitter
         $graph = new Graph;
         $graph->setMeta(['project' => $projectName, 'analyzedAt' => $analyzedAt]);
 
-        $listenersByEvent = [];
-        foreach ($listenerEdges as $edge) {
-            if ($edge->type === 'listener') {
-                $listenersByEvent[ltrim($edge->callerFqcn, '\\')][] = ltrim($edge->calleeFqcn, '\\');
-            }
-        }
-
         foreach ($events as $fqcn => $event) {
-            $listeners = $listenersByEvent[$fqcn] ?? [];
-
             $graph->addNode(new Node(
                 id: "event::{$fqcn}",
                 type: 'event',
@@ -343,14 +333,7 @@ class GraphSplitter
                 data: [
                     'fqcn' => $fqcn,
                     'file' => $event->file,
-                    'event' => [
-                        ...$event->toArray(),
-                        'listenerCount' => count($listeners),
-                        // The one thing worth saying about an event before anything else: whether
-                        // firing it does anything at all.
-                        'orphan' => $listeners === [],
-                        'observableBeforeCommit' => $deferral->observableBeforeCommit($event->deferred, $listeners),
-                    ],
+                    'event' => $facts->eventPayload($fqcn),
                 ],
             ));
         }
@@ -365,21 +348,13 @@ class GraphSplitter
             }
 
             if (! $graph->hasNode($listenerId)) {
-                $queued = $deferral->isQueued($listenerFqcn);
-
                 $graph->addNode(new Node(
                     id: $listenerId,
                     type: 'listener',
                     label: $this->shortName($listenerFqcn),
                     data: [
                         'fqcn' => $listenerFqcn,
-                        'listener' => [
-                            'queued' => $queued,
-                            // Whether it waits for the commit is a property of the connection, not
-                            // of the listener, so it is resolved here rather than left to a reader
-                            // who would have to go and read queue.php to know.
-                            'deferred' => $queued && $deferral->queuedWorkIsDeferred(),
-                        ],
+                        'listener' => $facts->listenerPayload($listenerFqcn),
                     ],
                 ));
             }
@@ -388,7 +363,7 @@ class GraphSplitter
                 id: 'e_'.hash('xxh128', $eventId."\x1f".$listenerId),
                 source: $eventId,
                 target: $listenerId,
-                label: $deferral->isQueued($listenerFqcn) ? 'queued' : 'handles',
+                label: $facts->listenerPayload($listenerFqcn)['queued'] === true ? 'queued' : 'handles',
                 type: 'event-to-listener',
             ));
         }

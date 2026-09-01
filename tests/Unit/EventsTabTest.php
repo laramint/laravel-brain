@@ -2,16 +2,16 @@
 
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\EventDefinition;
+use LaraMint\LaravelBrain\Analysis\EventFacts;
 use LaraMint\LaravelBrain\Analysis\QueueDeferral;
 use LaraMint\LaravelBrain\Graph\GraphSplitter;
 
 function eventsTab(array $events, array $listenerEdges = [], array $firedBy = [], bool $queueDefers = false): ?array
 {
     return (new GraphSplitter)->buildEventsTab(
-        $events,
+        new EventFacts($events, $listenerEdges, new QueueDeferral(defersByDefault: $queueDefers)),
         $listenerEdges,
         $firedBy,
-        new QueueDeferral(defersByDefault: $queueDefers),
         'test',
         '2026-01-01',
     );

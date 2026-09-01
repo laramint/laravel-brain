@@ -596,6 +596,33 @@ class ProjectAnalyzer
 
         $this->emit('step:done', ['step' => 'graph', 'count' => $fullGraph->nodeCount(), 'unit' => 'node', 'extra' => $fullGraph->edgeCount().' edges', 'message' => "    {$fullGraph->nodeCount()} nodes, {$fullGraph->edgeCount()} edges"]);
 
+        // Computed before the split so the facts reach every subgraph, not only the events tab:
+        // a route graph shows the events that request dispatches, and those nodes carried nothing
+        // but a name and a file until they were stamped here.
+        $eventsEnabled = (bool) config('laravel-brain.events.enabled', true);
+        $eventAnalyzer = null;
+        $eventFacts = null;
+
+        if ($eventsEnabled) {
+            $eventPaths = config('laravel-brain.events.paths', EventAnalyzer::DEFAULT_PATHS);
+            $eventAnalyzer = new EventAnalyzer(
+                is_array($eventPaths) ? array_values($eventPaths) : EventAnalyzer::DEFAULT_PATHS,
+                $this->listenerPaths,
+            );
+
+            $events = $eventAnalyzer->analyze($projectRoot);
+
+            // An event kept outside the configured directories is still an event once something
+            // listens to it, and the listener edge names it. Added without a definition rather
+            // than skipped, so the choreography stays whole.
+            foreach (EventAnalyzer::fqcnsFrom($listenerEdges) as $fqcn) {
+                $events[$fqcn] ??= new EventDefinition(fqcn: $fqcn);
+            }
+
+            $eventFacts = new EventFacts($events, $listenerEdges, new QueueDeferral);
+            $eventFacts->stamp($fullGraph);
+        }
+
         $this->emit('step:start', ['step' => 'split', 'label' => 'Splitting into tab subgraphs', 'message' => '  → Splitting into tab subgraphs...']);
         $split = $this->graphSplitter->split($fullGraph, $routes, $commands, $channels, $schedules, $projectName, $analyzedAt, $filamentResult['panels'], $filamentResult['resources'], $filamentResult['pages']);
 
@@ -612,27 +639,11 @@ class ProjectAnalyzer
             $split['manifest'][] = $erd['manifest'];
         }
 
-        if ((bool) config('laravel-brain.events.enabled', true)) {
-            $eventPaths = config('laravel-brain.events.paths', EventAnalyzer::DEFAULT_PATHS);
-            $eventAnalyzer = new EventAnalyzer(
-                is_array($eventPaths) ? array_values($eventPaths) : EventAnalyzer::DEFAULT_PATHS,
-                $this->listenerPaths,
-            );
-
-            $events = $eventAnalyzer->analyze($projectRoot);
-
-            // An event kept outside the configured directories is still an event once something
-            // listens to it, and the listener edge names it. Added without a definition rather
-            // than skipped, so the choreography stays whole.
-            foreach (EventAnalyzer::fqcnsFrom($listenerEdges) as $fqcn) {
-                $events[$fqcn] ??= new EventDefinition(fqcn: $fqcn);
-            }
-
+        if ($eventFacts !== null && $eventAnalyzer !== null) {
             $eventsTab = $this->graphSplitter->buildEventsTab(
-                $events,
+                $eventFacts,
                 $listenerEdges,
-                $eventAnalyzer->firedBy($projectRoot, $events),
-                new QueueDeferral,
+                $eventAnalyzer->firedBy($projectRoot, $eventFacts->events()),
                 $projectName,
                 $analyzedAt,
             );
