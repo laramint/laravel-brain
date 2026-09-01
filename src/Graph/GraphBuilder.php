@@ -6,6 +6,7 @@ namespace LaraMint\LaravelBrain\Graph;
 
 use Illuminate\Support\Str;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
+use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
 use LaraMint\LaravelBrain\Analysis\ConsoleCommandDefinition;
@@ -649,7 +650,71 @@ class GraphBuilder
             }
         }
 
+        // ── 5. Cache-operation pass ───────────────────────────────────────────
+        //
+        // Read back off the flow steps instead of re-walking the ASTs: FlowExtractor has already
+        // resolved the facade alias and the key for every call it charted, and every node with a
+        // method behind it carries flowSteps. One pass here therefore covers the twenty-odd sites
+        // that build such a node, where doing it at creation time would mean twenty-odd copies of
+        // the same three lines — and would silently miss whatever node type is added next.
+        //
+        // Scope is deliberately the node's own body, unlike dbQueries, which follow the call
+        // chain: a cache operation belongs to the method that performs it. Attributing a
+        // service's `Cache::forget()` upwards to every action above it would put the same key on
+        // a dozen panels and lose the one method actually responsible for clearing it — and the
+        // graph edges already lead there.
+        foreach ($this->graph->nodes() as $node) {
+            $steps = $node->data['flowSteps'] ?? null;
+            if (! is_array($steps) || $steps === []) {
+                continue;
+            }
+
+            $cacheOps = $this->collectCacheOps($steps);
+            if ($cacheOps !== []) {
+                $this->graph->updateNodeData($node->id, array_merge($node->data, ['cacheOps' => $cacheOps]));
+            }
+        }
+
         return $this->graph;
+    }
+
+    /**
+     * Every distinct cache operation a flow performs, in the order the source performs them.
+     *
+     * @param  array[]  $steps
+     * @return array[]
+     */
+    private function collectCacheOps(array $steps): array
+    {
+        $found = [];
+        $this->gatherCacheOps($steps, $found);
+
+        return array_values($found);
+    }
+
+    /**
+     * @param  array[]  $steps
+     * @param  array<string, array>  $found  signature => operation, so a key read twice is one row
+     */
+    private function gatherCacheOps(array $steps, array &$found): void
+    {
+        foreach ($steps as $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+
+            if (isset($step['cache']) && is_array($step['cache'])) {
+                $found[CacheOperation::signatureOf($step['cache'])] ??= $step['cache'];
+            }
+
+            // A cache call inside a branch or a callback is still a cache call this method makes;
+            // the N+1 pass walks the same three keys for the same reason.
+            foreach (['then', 'else', 'body'] as $branch) {
+                if (isset($step[$branch]) && is_array($step[$branch])) {
+                    $this->gatherCacheOps($step[$branch], $found);
+                }
+            }
+        }
     }
 
     // ── Node creation helpers ─────────────────────────────────────────────────

@@ -243,3 +243,52 @@ it('forgets a loop variable once the loop has ended', function () {
     expect($steps[0]['n1'] ?? false)->toBeTrue()
         ->and($steps[1]['n1'] ?? false)->toBeFalse();
 });
+
+it('charts a cache call as its own step type, not an anonymous call', function () {
+    // `call` and `assign` are both drawn as plain rectangles, so re-typing costs nothing and
+    // buys the one distinction worth having on a chart: this step talks to the cache.
+    $steps = flowFor('        \Cache::forget("users.index");');
+
+    expect($steps[0]['type'])->toBe('cache')
+        ->and($steps[0]['cache'])->toMatchArray([
+            'kind' => 'invalidate',
+            'method' => 'forget',
+            'key' => 'users.index',
+        ]);
+});
+
+it('charts an assignment from the cache as a cache step', function () {
+    $steps = flowFor('        $users = \Cache::get("users.index");');
+
+    expect($steps[0]['type'])->toBe('cache')
+        ->and($steps[0]['label'])->toBe('$users = Cache::get("users.index")')
+        ->and($steps[0]['cache']['kind'])->toBe('read');
+});
+
+it('leaves a returned cache read drawn as a return, with the details attached', function () {
+    // `return` is drawn as a terminal in both renderers and reads as the end of the flow;
+    // trading that shape for a colour would cost more than it buys.
+    $steps = flowFor('        return \Cache::get("users.index");');
+
+    expect($steps[0]['type'])->toBe('return')
+        ->and($steps[0]['cache']['kind'])->toBe('read');
+});
+
+it('keeps the cache details on a remember() whose body it descends into', function () {
+    // withCallbackBody() re-types the step to `loop`, the only type either renderer descends
+    // into. The cache payload has to survive that, or the commonest cache call in Laravel is
+    // the one call that never shows as one.
+    $steps = flowFor('        \Cache::remember("users.index", 600, function () {
+            return $this->repo->all();
+        });');
+
+    expect($steps[0]['type'])->toBe('loop')
+        ->and($steps[0]['body'] ?? [])->toHaveCount(1)
+        ->and($steps[0]['cache'])->toMatchArray(['kind' => 'read', 'method' => 'remember', 'ttl' => 600]);
+});
+
+it('leaves a step that touches no cache without a cache key', function () {
+    $steps = flowFor('        $this->payer->charge();');
+
+    expect($steps[0])->not->toHaveKey('cache');
+});

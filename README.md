@@ -38,6 +38,7 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Scheduler tracing** — Visualizes scheduled tasks (`command`, `job`, `call`) with their frequency
 - **Broadcast channel mapping** — Discovers class-based and closure channels from `routes/channels.php`
 - **DB query tracing** — Surfaces Eloquent and raw queries per method
+- **Cache operation tracing** — Surfaces `Cache::` facade and `cache()` helper calls per method, split into read / write / invalidate / lock, with the key (literal or constructed — a computed one is labelled, never guessed), plus tags, store and TTL where declared
 - **Fat-class detection** — Flags controllers and services with more than 300 lines or 10 methods
 - **Cyclomatic complexity** — Highlights hotspots by complexity tier (Low / Moderate / High / Critical)
 - **Interactive graph** — Dark/light theme, accent-colored nodes, and interactive edges
@@ -55,7 +56,7 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Multiple layouts** — Hierarchical (dagre), force-directed (cose-bilkent), breadth-first, circle, grid
 - **Watch mode** — Auto-rescans on PHP file changes; a change confined to `app/` re-traces only the affected controllers and merges the result into the previous graph instead of rebuilding it from scratch
 - **Route stress test** — From a selected **route** node, run concurrent HTTP load against that endpoint (via [`laramint/laravel-stress`](https://github.com/LaraMint/laravel-stress)): configure request count, concurrency, headers, body, and timeout; see timing percentiles (min/avg/p50/p95/p99/max), throughput, and status distribution in the sidebar. While a run is active, the graph highlights the route and animates packets along the request path
-- **AI context export** — Copy a deterministic, token-optimized context snapshot for any node to your clipboard with one click (🤖 button in the sidebar). Also available as `brain:export-context` Artisan command and `GET /_laravel-brain/api/context` API endpoint. Context includes call chain, complexity hotspots, DB operations, source snippets, and all backend/frontend packages — always reproducible from the same scan data
+- **AI context export** — Copy a deterministic, token-optimized context snapshot for any node to your clipboard with one click (🤖 button in the sidebar). Also available as `brain:export-context` Artisan command and `GET /_laravel-brain/api/context` API endpoint. Context includes call chain, complexity hotspots, DB operations, cache operations, source snippets, and all backend/frontend packages — always reproducible from the same scan data
 - **AI rules generation** — Generate ready-to-use context files for seven AI coding assistants (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains Junie, Aider, AGENTS.md) directly from the UI (**Export → Generate AI Rules**) or via `brain:generate-rules`. Each file is populated with your project's real architecture, routes, packages, and code-health data
 
 ## Requirements
@@ -146,6 +147,7 @@ The exported Markdown contains:
 - **Call chain** — `Route → Controller → Service → Model` (depth ≤ 3)
 - **Complexity hotspots** — cyclomatic complexity + line count table
 - **Database operations** — Eloquent and raw queries per node
+- **Cache operations** — read / write / invalidate / lock per node, with key, tags, store and TTL
 - **Source snippets** — focal node first, truncated to fit the token budget
 - **Backend packages** — all `composer.json` dependencies with versions, dev flag
 - **Frontend packages** — all `package.json` dependencies with versions, dev flag
@@ -411,6 +413,7 @@ A file named `*PanelProvider.php` is treated as a panel by convention. Any other
 | View flowchart | Click a class node → Flow tab |
 | Flowchart popup | Click ⤢ in flow section to open large view |
 | View sequence diagram | Click a route node → Sequence Diagram section in sidebar |
+| See what a method caches | Click a node → Info tab → Cache section |
 | Filter by type | Filter panel on the left |
 | Fit all nodes | Toolbar → Fit button |
 | Export PNG | Toolbar → Export → Download PNG |

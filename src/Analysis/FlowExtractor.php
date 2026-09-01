@@ -15,6 +15,7 @@ use PhpParser\PrettyPrinter\Standard as PrettyPrinter;
  *   { type: 'return',   label: string }
  *   { type: 'dispatch', label: string }
  *   { type: 'event',    label: string }
+ *   { type: 'cache',    label: string, cache: array }
  *   { type: 'if',       label: string, then: step[], else: step[] }
  *   { type: 'loop',     label: string, body: step[] }
  *   { type: 'assign',   label: string }
@@ -24,6 +25,8 @@ use PhpParser\PrettyPrinter\Standard as PrettyPrinter;
 class FlowExtractor
 {
     private PrettyPrinter $printer;
+
+    private CacheOperationDetector $cacheDetector;
 
     private array $useMap;
 
@@ -45,6 +48,7 @@ class FlowExtractor
     public function __construct(private readonly bool $relationsAutoloaded = false)
     {
         $this->printer = new PrettyPrinter;
+        $this->cacheDetector = new CacheOperationDetector;
         $this->useMap = [];
     }
 
@@ -211,7 +215,9 @@ class FlowExtractor
                 ? 'return '.$this->shortExpr($stmt->expr)
                 : 'return';
 
-            return ['type' => 'return', 'label' => $label];
+            $step = ['type' => 'return', 'label' => $label];
+
+            return $stmt->expr === null ? $step : $this->tagCacheOperation($step, $stmt->expr);
         }
 
         // if (...) { ... } else { ... }
@@ -314,7 +320,10 @@ class FlowExtractor
             $varLabel = $this->shortExpr($expr->var);
             $valLabel = $this->shortExpr($expr->expr);
 
-            return ['type' => 'assign', 'label' => "{$varLabel} = {$valLabel}"];
+            return $this->markCacheOperation(
+                ['type' => 'assign', 'label' => "{$varLabel} = {$valLabel}"],
+                $expr->expr,
+            );
         }
 
         // SomeJob::dispatch(...)  →  dispatch
@@ -334,7 +343,10 @@ class FlowExtractor
                 return ['type' => 'dispatch', 'label' => "Bus::{$method}(...)"];
             }
 
-            return $this->withCallbackBody(['type' => 'call', 'label' => "{$short}::{$method}(...)"], $expr->args);
+            return $this->withCallbackBody(
+                $this->markCacheOperation(['type' => 'call', 'label' => "{$short}::{$method}(...)"], $expr),
+                $expr->args,
+            );
         }
 
         // $this->service->method(...)  /  $var->method(...)
@@ -345,7 +357,10 @@ class FlowExtractor
                 return ['type' => 'dispatch', 'label' => $this->shortExpr($expr)];
             }
 
-            return $this->withCallbackBody(['type' => 'call', 'label' => $this->shortExpr($expr)], $expr->args);
+            return $this->withCallbackBody(
+                $this->markCacheOperation(['type' => 'call', 'label' => $this->shortExpr($expr)], $expr),
+                $expr->args,
+            );
         }
 
         // event(new SomeEvent)  /  dispatch(new SomeJob)  /  dispatch_sync(new SomeJob)
@@ -358,10 +373,49 @@ class FlowExtractor
                 return ['type' => 'dispatch', 'label' => $this->shortExpr($expr)];
             }
 
-            return $this->withCallbackBody(['type' => 'call', 'label' => $this->shortExpr($expr)], $expr->args);
+            return $this->withCallbackBody(
+                $this->markCacheOperation(['type' => 'call', 'label' => $this->shortExpr($expr)], $expr),
+                $expr->args,
+            );
         }
 
         return null;
+    }
+
+    /**
+     * Re-type a step as a cache step when its expression is a cache call, and hang the details
+     * off it.
+     *
+     * Re-typing is what buys the distinct colour and icon — `call` and `assign` are both drawn as
+     * plain rectangles, so nothing is lost by trading either for `cache`. A step that goes on to
+     * pick up a callback body becomes a `loop`, because that is the only type either renderer
+     * descends into; the `cache` payload rides along and still shows, which is what makes
+     * `Cache::remember('k', 60, fn () => …)` readable as both a cache read and a block of work.
+     *
+     * @param  array{type: string, label: string}  $step
+     * @return array<string, mixed>
+     */
+    private function markCacheOperation(array $step, Node\Expr $expr): array
+    {
+        $operation = $this->cacheDetector->detect($expr, $this->useMap);
+
+        return $operation === null ? $step : ['type' => 'cache'] + $step + ['cache' => $operation->toArray()];
+    }
+
+    /**
+     * Hang cache details off a step whose own type is load-bearing.
+     *
+     * A `return` is drawn as a terminal in both renderers and reads as the end of the flow;
+     * `return Cache::get(...)` is still a return, so it keeps its shape and gains only the badge.
+     *
+     * @param  array{type: string, label: string}  $step
+     * @return array<string, mixed>
+     */
+    private function tagCacheOperation(array $step, Node\Expr $expr): array
+    {
+        $operation = $this->cacheDetector->detect($expr, $this->useMap);
+
+        return $operation === null ? $step : $step + ['cache' => $operation->toArray()];
     }
 
     /**

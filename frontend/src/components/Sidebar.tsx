@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
-import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery } from '../types/graph'
+import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
 import { FlowchartModal } from './FlowchartModal'
@@ -82,6 +82,18 @@ function formatRows(rows: number | null, estimated: boolean): string {
 
   return `${estimated ? '~' : ''}${rows.toLocaleString('en-US')}`
 }
+/**
+ * What each cache kind means, for people who have not internalised which Laravel method does
+ * what. `remember` reading rather than writing is the one that surprises everybody.
+ */
+const CACHE_KIND_HINTS: Record<string, string> = {
+  read:       'Reads a cached value — this data can be stale. `remember` counts as a read: it writes only on a miss.',
+  write:      'Writes a value into the cache.',
+  invalidate: 'Clears cached data. `pull` is here too: it reads the key and removes it.',
+  lock:       'Takes an atomic lock through the cache store.',
+}
+
+type TabId = 'info' | 'risks' | 'flow' | 'source' | 'edges' | 'usages' | 'stress'
 
 export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
@@ -248,6 +260,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const hasN1 = !!node.data?.hasN1
 
   const dbQueries = (node.data?.dbQueries ?? []) as DbQuery[]
+  const cacheOps = (node.data?.cacheOps ?? []) as CacheOperation[]
   const relationships = (node.data?.relationships ?? []) as Array<{ type: string; related: string }>
   const middlewareParams = (node.type === 'middleware' && typeof node.data?.params === 'string' && node.data.params)
     ? (node.data.params as string).split(',').map(s => s.trim()).filter(Boolean)
@@ -266,6 +279,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'hasN1' &&
       key !== 'classMetrics' &&
       key !== 'dbQueries' &&
+      key !== 'cacheOps' &&
       key !== 'relationships' &&
       key !== 'params' &&
       key !== 'members' &&
@@ -601,6 +615,47 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                         </div>
                       )
                     })}
+                  </div>
+                </div>
+              )}
+
+              {cacheOps.length > 0 && (
+                <div className="sidebar-section sidebar-section--cache">
+                  <h3>Cache</h3>
+                  <div className="cache-list">
+                    {cacheOps.map((op, i) => (
+                      <div key={i} className="cache-item">
+                        <div className="cache-item-head">
+                          <Tooltip content={CACHE_KIND_HINTS[op.kind] ?? op.kind}>
+                            <span className={`cache-kind cache-kind--${op.kind}`}>{op.kind}</span>
+                          </Tooltip>
+                          <span className="cache-method">{op.method}</span>
+                          {op.keyKind === 'computed' ? (
+                            <Tooltip content="The key is built at runtime, so it cannot be read from the source.">
+                              <span className="cache-key cache-key--computed">computed key</span>
+                            </Tooltip>
+                          ) : op.keyKind === 'none' ? (
+                            <span className="cache-key cache-key--computed">whole store</span>
+                          ) : (
+                            <span
+                              className={`cache-key cache-key--${op.keyKind}`}
+                              title={op.key}
+                            >
+                              {op.key}
+                            </span>
+                          )}
+                        </div>
+                        {(op.tags.length > 0 || op.store !== '' || op.ttl !== null) && (
+                          <div className="cache-item-meta">
+                            {op.ttl !== null && <span className="cache-meta">ttl {op.ttl}s</span>}
+                            {op.store !== '' && <span className="cache-meta">store {op.store}</span>}
+                            {op.tags.map((tag, t) => (
+                              <span key={t} className="cache-meta cache-meta--tag">{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
