@@ -327,6 +327,49 @@ class HttpCallExtractor
             return $settings + $this->laravelClients[$label];
         }
 
+        // A pending request handed to something else comes back out of it still a request. Wrapping
+        // the builder in a helper is how a project applies one retry or timeout policy everywhere
+        // — `TransientFailureRetry::applyTo(Http::baseUrl($url))->timeout(5)` — and the chain then
+        // roots in the helper rather than in `Http`. This does not guess what the helper returns:
+        // the argument WAS a request, and the result is being used as one.
+        $wrapped = $this->wrappedRequestSettings($node);
+        if ($wrapped !== null) {
+            return $settings + $wrapped;
+        }
+
+        return null;
+    }
+
+    /**
+     * The request settings of an HTTP builder passed as an argument to another call.
+     *
+     * Only the arguments are examined, and only for a chain that itself roots at the facade, so a
+     * call that never touched a request stays unrecognised.
+     */
+    private function wrappedRequestSettings(Node\Expr $node): ?array
+    {
+        $args = match (true) {
+            $node instanceof Node\Expr\StaticCall,
+            $node instanceof Node\Expr\MethodCall,
+            $node instanceof Node\Expr\FuncCall => $node->args,
+            default => null,
+        };
+
+        if ($args === null) {
+            return null;
+        }
+
+        foreach ($args as $arg) {
+            if (! $arg instanceof Node\Arg) {
+                continue;
+            }
+
+            $inner = $this->laravelChain($arg->value);
+            if ($inner !== null) {
+                return $inner;
+            }
+        }
+
         return null;
     }
 

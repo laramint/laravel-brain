@@ -633,3 +633,44 @@ describe('what reaches the graph', function () {
         expect($withCalls)->toBe([]);
     });
 });
+
+it('follows a pending request handed through a wrapper', function () {
+    // How a project applies one retry or timeout policy everywhere. The chain then roots in the
+    // helper rather than in `Http`, and the request became invisible: measured on an application
+    // whose house style is exactly this, 50 files make HTTP calls and the scan found one.
+    $calls = httpCallsInMethodBody(<<<'PHP'
+        $request = \App\Support\TransientFailureRetry::applyTo(Http::baseUrl('https://api.example/v1'))
+            ->timeout(5);
+
+        $request->get('/items');
+        PHP, 'use Illuminate\Support\Facades\Http;');
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['method'])->toBe('GET')
+        // Laravel accepts a fractional timeout, so it is stored as a float.
+        ->and($calls[0]['timeout'])->toEqual(5.0);
+});
+
+it('keeps the base url the wrapped request was built with', function () {
+    $calls = httpCallsInMethodBody(<<<'PHP'
+        $request = \App\Support\TransientFailureRetry::applyTo(Http::baseUrl('https://api.example/v1'));
+
+        $request->post('/orders');
+        PHP, 'use Illuminate\Support\Facades\Http;');
+
+    expect($calls[0]['method'])->toBe('POST')
+        ->and($calls[0]['url'])->toContain('api.example');
+});
+
+it('does not call a wrapper that never held a request an outgoing call', function () {
+    // The guard the rule must not loosen. Only an argument that is itself an HTTP chain counts;
+    // a helper handed anything else is not a request, and reporting one would put a third party
+    // on the graph that this code never talks to.
+    $calls = httpCallsInMethodBody(<<<'PHP'
+        $request = \App\Support\TransientFailureRetry::applyTo($this->config)->timeout(5);
+
+        $request->get('/items');
+        PHP);
+
+    expect($calls)->toBeEmpty();
+});
