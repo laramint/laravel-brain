@@ -63,6 +63,11 @@ final class ActionClasses
     /** @var array<string, bool> absolute file path => sits under an action directory */
     private array $containsMemo = [];
 
+    /** @var array<string, string> path => canonical path with symlinks and separators resolved */
+    private array $resolvedPathMemo = [];
+
+    private ?string $resolvedRoot = null;
+
     /** @var array<string, string|null> absolute file path => sole entry method, or null */
     private array $entryMethodMemo = [];
 
@@ -83,6 +88,19 @@ final class ActionClasses
      * Containment is anchored at the project root rather than tested as a substring, for the
      * reason {@see SourceDirectories::contains()} gives: a project that itself lives under a
      * directory called `Actions` would otherwise have every one of its files claimed.
+     *
+     * The path is resolved first, because this is the one caller that hands the check a file
+     * the *call-chain tracer* produced rather than one a directory walk produced. The tracer
+     * resolves a class through Composer's autoloader, and in a modular monolith built on path
+     * repositories every module is reached through a symlink under `vendor/`. So the same file
+     * arrives spelled `vendor/acme/orders/src/Actions/PlaceOrder.php` while the configured
+     * directory is `app-modules/orders/src/Actions` — one directory, two spellings, and a
+     * prefix test matches neither. Measured on such an application: 254 action classes, of
+     * which the tracer reached several and the check claimed none.
+     *
+     * `SourceDirectories::contains()` is deliberately left alone: its other two callers are fed
+     * by the file watcher, already hold real paths, and pay nothing for a resolution they do
+     * not need.
      */
     public function isActionClass(string $file): bool
     {
@@ -91,10 +109,24 @@ final class ActionClasses
         }
 
         return $this->containsMemo[$file] ??= SourceDirectories::contains(
-            $this->projectRoot,
+            $this->resolvedRoot ??= $this->resolvePath($this->projectRoot),
             $this->directories(),
-            $file,
+            $this->resolvePath($file),
         );
+    }
+
+    /**
+     * The canonical path, or the argument unchanged when it cannot be resolved — a file that no
+     * longer exists is not an action class, and neither is one this cannot make sense of.
+     *
+     * Both sides of the comparison go through this, because resolving one of them is worse than
+     * resolving neither: `realpath()` also collapses `..` segments and repeated separators, so a
+     * root spelled `tests//fixtures/project` would stop matching its own files the moment the
+     * file side was canonicalised.
+     */
+    private function resolvePath(string $path): string
+    {
+        return $this->resolvedPathMemo[$path] ??= (realpath($path) ?: $path);
     }
 
     /**

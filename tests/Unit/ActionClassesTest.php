@@ -225,6 +225,35 @@ describe('ActionClasses', function () {
             ->and($actions->isActionClass($project.'/app/Actions/CreateOrder.php'))->toBeFalse();
     });
 
+    it('recognises a file reached through a symlinked package directory', function () {
+        // The call-chain tracer resolves classes through Composer's autoloader, so in a modular
+        // monolith on path repositories a module's files arrive spelled through the symlink under
+        // vendor/ while the configured root names the real directory. One directory, two
+        // spellings. Measured on such an application: 254 action classes, none claimed.
+        $project = fixture('actions-project');
+        $link = $project.'/vendor/acme/billing';
+
+        if (! is_dir(dirname($link))) {
+            @mkdir(dirname($link), 0o777, true);
+        }
+        if (! is_link($link) && ! @symlink($project.'/packages/billing', $link)) {
+            $this->markTestSkipped('the filesystem does not allow creating symlinks');
+        }
+
+        // Cleared however this ends: the link grafts a second copy of packages/billing into the
+        // shared fixture, and every later test that scans this project would count it twice.
+        try {
+            $actions = new ActionClasses($project, ['packages/*/src/Actions']);
+
+            expect($actions->isActionClass($link.'/src/Actions/ChargeCard.php'))->toBeTrue()
+                ->and($actions->entryMethod($link.'/src/Actions/ChargeCard.php'))->toBe('__invoke');
+        } finally {
+            @unlink($link);
+            @rmdir(dirname($link));
+            @rmdir(dirname($link, 2));
+        }
+    });
+
     it('anchors containment at the project root instead of matching a substring', function () {
         $project = fixture('actions-project');
         $actions = new ActionClasses($project, ['app/Actions']);
