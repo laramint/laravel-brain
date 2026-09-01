@@ -7,8 +7,11 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   middleware: 'Middleware',
   controller: 'Controllers',
   livewire_component: 'Livewire',
-  action: 'Actions',
-  action_class: 'Action classes',
+  // "Action" unqualified means the Actions/ class pattern in ordinary Laravel usage, so the
+  // unqualified label belongs to that kind. The controller method is precisely a controller
+  // action, and saying so is what keeps two adjacent legend rows from differing by one word.
+  action: 'Controller actions',
+  action_class: 'Actions',
   service: 'Services',
   validation_request: 'Validation',
   model: 'Models',
