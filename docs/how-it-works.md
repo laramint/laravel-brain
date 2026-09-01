@@ -219,6 +219,17 @@ Three shapes are flagged, because each one fails without an error anywhere:
 
 A provider whose `provides()` is computed rather than written out is reported as such and never flagged: a declaration we could only half read is not evidence of a defect.
 
+The whole read is a switch, on by default. It costs a second walk over `container_bindings.provider_paths`; parse results are shared across the build, so nothing is re-read from disk. Off means the walk does not happen — not that its result is discarded:
+
+```php
+// config/laravel-brain.php
+'service_providers' => [
+    'enabled' => false,
+],
+```
+
+Or `LARAVEL_BRAIN_SERVICE_PROVIDERS_ENABLED=false` in the environment.
+
 ## Filament PHP support
 
 When Filament is installed, the scanner discovers every panel registered via service providers, then resolves its resources, pages, widgets, and relation managers — both explicitly listed (`->resources([...])`) and auto-discovered (`->discoverResources(for: '...')`). Filament page methods are traced through the same call-chain engine as controller actions, so models and services they touch appear in the graph.
