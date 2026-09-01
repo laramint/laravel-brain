@@ -31,6 +31,21 @@ class RouteDefinition
 
 class RouteAnalyzer
 {
+    /**
+     * Every HTTP verb Brain understands: the ones it will extract from a routes file, colour in
+     * the sidebar, and offer to the stress runner. One list, because the three used to be written
+     * out separately and drifted — OPTIONS was extracted by the analyzer but had no sidebar chip,
+     * so `Route::options()` routes were invisible to the method filter.
+     *
+     * QUERY (RFC 9110bis; a safe, idempotent method that carries its query in the request body)
+     * is here even though no released Laravel registers it: `Route::query()` and the QUERY entry
+     * in `Router::$verbs` were merged in laravel/framework#60655, which went to `master` — the
+     * 14.x line — not to 13.x. On 9 through 13 the only spelling is `Route::match(['query'], …)`,
+     * which the visitor below handles alongside the helper. Reading a verb out of source costs
+     * nothing on a version that cannot register it, and an app that upgrades needs no change here.
+     */
+    public const HTTP_VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'QUERY'];
+
     private PhpFileParser $parser;
 
     /** @var string[] */
@@ -979,6 +994,57 @@ class RouteAnalyzer
     }
 
     /**
+     * The verbs a `Route::any()` call actually answers, asked of the router the analysed
+     * application is running rather than assumed.
+     *
+     * `any()` registers `Router::$verbs` verbatim, and that list is not fixed across the versions
+     * this package supports: 9 through 13 hold GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, while
+     * the 14.x line adds QUERY (laravel/framework#60655). Hard-coding either list is wrong on the
+     * other half of the matrix — it would either drop a real QUERY endpoint or invent one the app
+     * cannot serve. The property is read through reflection for the reason
+     * {@see RelationAutoloading} gives: a literal `method_exists`/direct read is decided at
+     * analysis time against the single installed version, so it fails one end of the matrix or
+     * the other, while reflection asks the question without asserting an answer.
+     *
+     * HEAD is dropped here exactly as {@see self::discoverFromRouter()} drops it, so a route
+     * written `Route::any()` produces the same set of tabs whichever mode read it.
+     *
+     * @return list<string>
+     *
+     * @internal
+     */
+    public static function anyRouteVerbs(): array
+    {
+        $verbs = [];
+
+        try {
+            $router = new \ReflectionClass(\Illuminate\Routing\Router::class);
+
+            if ($router->hasProperty('verbs')) {
+                $declared = $router->getStaticPropertyValue('verbs');
+
+                if (is_array($declared)) {
+                    foreach ($declared as $verb) {
+                        if (is_string($verb)) {
+                            $verbs[] = strtoupper($verb);
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Scanned outside an application, or a router that has been replaced wholesale.
+        }
+
+        if ($verbs === []) {
+            // The list every supported version shares. Never QUERY: guessing it present would put
+            // an endpoint in the graph that a 13-and-below app answers with 405.
+            $verbs = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+        }
+
+        return array_values(array_unique(array_filter($verbs, fn (string $verb): bool => $verb !== 'HEAD')));
+    }
+
+    /**
      * @param  Node\Stmt[]  $ast
      * @param  array<string, string>  $useMap
      * @param  string[]  $seedPrefix  Prefix stack inherited from an enclosing require
@@ -1021,7 +1087,16 @@ class RouteAnalyzer
             /** @var array<string, true> */
             private array $visited;
 
-            private const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'any'];
+            /**
+             * Router calls that register a route. The single-verb helpers are derived from
+             * {@see RouteAnalyzer::HTTP_VERBS} so the analyzer, the sidebar chips and the stress
+             * runner cannot disagree about which verbs exist; `any` and `match` are listed
+             * separately because they name their verbs elsewhere — `any` in the router's own
+             * verb list, `match` in its first argument.
+             *
+             * @var list<string>
+             */
+            private array $routeCalls;
 
             /**
              * Methods that Laravel allows chaining AFTER a route definition:
@@ -1048,6 +1123,10 @@ class RouteAnalyzer
                 $this->middlewareStack = $seedMiddleware;
                 $this->namespaceStack = $seedNamespace;
                 $this->controllerStack = $seedController;
+                $this->routeCalls = array_merge(
+                    array_map('strtolower', RouteAnalyzer::HTTP_VERBS),
+                    ['any', 'match'],
+                );
                 $this->visited = $visited;
             }
 
@@ -1073,10 +1152,8 @@ class RouteAnalyzer
                         return null;
                     }
 
-                    if (in_array($methodName, self::HTTP_METHODS, true)) {
+                    if (in_array($methodName, $this->routeCalls, true)) {
                         $this->handleHttpRoute($node, $methodName);
-                    } elseif ($methodName === 'match') {
-                        $this->handleMatchRoute($node);
                     } elseif ($methodName === 'group') {
                         $this->enterGroupFromStaticCall($node);
                     } elseif (in_array($methodName, ['resource', 'apiResource'], true)) {
@@ -1095,10 +1172,8 @@ class RouteAnalyzer
                     $methodName = $node->name instanceof Node\Identifier ? $node->name->toString() : null;
                     if ($methodName === 'group') {
                         $this->enterGroupFromMethodChain($node);
-                    } elseif (in_array($methodName, self::HTTP_METHODS, true)) {
+                    } elseif (in_array($methodName, $this->routeCalls, true)) {
                         $this->handleHttpRoute($node, $methodName);
-                    } elseif ($methodName === 'match') {
-                        $this->handleMatchRoute($node);
                     } elseif (in_array($methodName, ['resource', 'apiResource'], true)) {
                         $this->handleResource($node, $methodName);
                     } elseif ($methodName === 'livewire') {
@@ -1141,15 +1216,76 @@ class RouteAnalyzer
             }
 
             /**
+             * Resolve a route-registering call into the verbs it answers and the argument index
+             * the URI sits at.
+             *
+             * Three shapes, all of which end up as one RouteDefinition per verb so that the graph
+             * built from source matches the one {@see RouteAnalyzer::discoverFromRouter()} builds
+             * from the live router:
+             *
+             *  - `Route::get(…)` and friends — the verb is the call name, URI at argument 0.
+             *  - `Route::any(…)` — the verbs are the router's own, URI at argument 0.
+             *  - `Route::match(['options', 'query'], …)` — the verbs are the first argument, so
+             *    everything else shifts right by one. Laravel accepts a bare string there too.
+             *
+             * A `match` whose verb list is built at runtime (a variable, a constant) resolves to
+             * no verbs and is skipped rather than guessed at, matching how the rest of the visitor
+             * treats a URI it cannot read.
+             *
+             * @return array{0: list<string>, 1: int}
+             */
+            private function resolveRouteVerbs(Node\Expr\StaticCall|Node\Expr\MethodCall $node, string $call): array
+            {
+                if ($call === 'any') {
+                    return [RouteAnalyzer::anyRouteVerbs(), 0];
+                }
+
+                if ($call !== 'match') {
+                    return [[strtoupper($call)], 0];
+                }
+
+                $arg = $node->args[0] ?? null;
+                $value = $arg instanceof Node\Arg ? $arg->value : null;
+
+                $items = [];
+                if ($value instanceof Node\Expr\Array_) {
+                    foreach ($value->items as $item) {
+                        if ($item !== null) {
+                            $items[] = $item->value;
+                        }
+                    }
+                } elseif ($value !== null) {
+                    $items[] = $value;
+                }
+
+                $verbs = [];
+                foreach ($items as $item) {
+                    if (! $item instanceof Node\Scalar\String_) {
+                        continue;
+                    }
+                    $verb = strtoupper($item->value);
+                    // HEAD is dropped for the same reason the live-router path drops it: Laravel
+                    // adds it alongside GET on its own, and a HEAD tab duplicates the GET one.
+                    if ($verb !== '' && $verb !== 'HEAD') {
+                        $verbs[] = $verb;
+                    }
+                }
+
+                return [array_values(array_unique($verbs)), 1];
+            }
+
+            /**
              * @param  string[]  $extraMiddlewares  Middleware collected from post-route chaining
              *                                      (e.g. Route::get(...)->middleware('ability:...'))
-             * @param  int  $argOffset  Index of the URI argument. 0 for Route::get('/uri', ...);
-             *                          1 for Route::match(['get','post'], '/uri', ...), whose first
-             *                          argument is the methods array rather than the URI.
              */
-            private function handleHttpRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, string $method, array $extraMiddlewares = [], int $argOffset = 0): void
+            private function handleHttpRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, string $method, array $extraMiddlewares = []): void
             {
-                $uri = $this->extractString($node->args[$argOffset] ?? null);
+                [$verbs, $uriArg] = $this->resolveRouteVerbs($node, $method);
+                if ($verbs === []) {
+                    return;
+                }
+
+                $uri = $this->extractString($node->args[$uriArg] ?? null);
                 if ($uri === null) {
                     return;
                 }
@@ -1166,10 +1302,10 @@ class RouteAnalyzer
                 $stackController = end($this->controllerStack) ?: '';
                 $controllerContext = $chainController !== '' ? $chainController : $stackController;
 
-                [$controller, $actionMethod, $closureNode, $mayPrependNamespace] = $this->extractAction($node->args[$argOffset + 1] ?? null, $controllerContext);
+                [$controller, $actionMethod, $closureNode, $mayPrependNamespace] = $this->extractAction($node->args[$uriArg + 1] ?? null, $controllerContext);
 
                 // An array action can carry its own middleware alongside `uses`.
-                $actionArg = $node->args[$argOffset + 1] ?? null;
+                $actionArg = $node->args[$uriArg + 1] ?? null;
                 $actionValue = $actionArg instanceof Node\Arg ? $actionArg->value : $actionArg;
                 if ($actionValue !== null) {
                     $actionMiddleware = $this->arrayValueFor($actionValue, 'middleware');
@@ -1194,53 +1330,20 @@ class RouteAnalyzer
                     $extraMiddlewares
                 );
 
-                $this->routes[] = new RouteDefinition(
-                    method: strtoupper($method),
-                    uri: $fullUri,
-                    controller: $controller,
-                    action: $actionMethod,
-                    middlewares: array_unique($middlewares),
-                    name: '',
-                    file: $this->file,
-                    line: $node->getStartLine(),
-                    tabGroup: strtoupper($method).' '.$fullUri,
-                    closureNode: $closureNode,
-                    closureUseMap: $closureNode !== null ? $this->useMap : null,
-                );
-            }
-
-            /**
-             * Handles Route::match(['get', 'post'], '/uri', $action) — registers one
-             * RouteDefinition per HTTP verb named in the methods array, mirroring how
-             * Laravel's router itself expands a match() call.
-             *
-             * @param  string[]  $extraMiddlewares  Middleware collected from post-route chaining
-             *                                      (e.g. Route::match([...], ...)->middleware('auth'))
-             */
-            private function handleMatchRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, array $extraMiddlewares = []): void
-            {
-                $methodsArg = $node->args[0] ?? null;
-                $methodsValue = $methodsArg instanceof Node\Arg ? $methodsArg->value : $methodsArg;
-                if ($methodsValue === null) {
-                    return;
-                }
-
-                // extractMiddlewareList() resolves a ClassConstFetch to its class name, which is
-                // right for `SomeMiddleware::class` but wrong for a verb written as a class
-                // constant (e.g. Request::METHOD_GET) — that would come back as the class's FQCN,
-                // not a verb. Filtering to the verbs this analyzer actually understands drops such
-                // an entry instead of registering a bogus route, matching how an unrecognised verb
-                // was already handled before Route::match() support existed: silently ignored.
-                $methods = array_values(array_intersect(
-                    array_unique(array_map('strtolower', $this->extractMiddlewareList($methodsValue))),
-                    [...self::HTTP_METHODS, 'head'],
-                ));
-                if ($methods === []) {
-                    return;
-                }
-
-                foreach ($methods as $method) {
-                    $this->handleHttpRoute($node, $method, $extraMiddlewares, 1);
+                foreach ($verbs as $verb) {
+                    $this->routes[] = new RouteDefinition(
+                        method: $verb,
+                        uri: $fullUri,
+                        controller: $controller,
+                        action: $actionMethod,
+                        middlewares: array_unique($middlewares),
+                        name: '',
+                        file: $this->file,
+                        line: $node->getStartLine(),
+                        tabGroup: $verb.' '.$fullUri,
+                        closureNode: $closureNode,
+                        closureUseMap: $closureNode !== null ? $this->useMap : null,
+                    );
                 }
             }
 
@@ -1323,14 +1426,8 @@ class RouteAnalyzer
                     }
 
                     // If we've reached the HTTP method call (e.g. ->get(), ->post()) stop here
-                    if ($name !== null && in_array($name, self::HTTP_METHODS, true)) {
+                    if ($name !== null && in_array($name, $this->routeCalls, true)) {
                         $this->handleHttpRoute($current, $name, $postMiddlewares);
-
-                        return true;
-                    }
-
-                    if ($name === 'match') {
-                        $this->handleMatchRoute($current, $postMiddlewares);
 
                         return true;
                     }
@@ -1344,7 +1441,7 @@ class RouteAnalyzer
                     $name = $current->name instanceof Node\Identifier ? $current->name->toString() : null;
 
                     if ($class === 'Route' && $name !== null) {
-                        if (in_array($name, self::HTTP_METHODS, true)) {
+                        if (in_array($name, $this->routeCalls, true)) {
                             $this->handleHttpRoute($current, $name, $postMiddlewares);
 
                             return true;
@@ -1352,12 +1449,6 @@ class RouteAnalyzer
 
                         if ($name === 'livewire') {
                             $this->handleLivewireRoute($current, $postMiddlewares);
-
-                            return true;
-                        }
-
-                        if ($name === 'match') {
-                            $this->handleMatchRoute($current, $postMiddlewares);
 
                             return true;
                         }

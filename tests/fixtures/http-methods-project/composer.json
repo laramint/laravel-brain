@@ -1,0 +1,8 @@
+{
+    "name": "test/http-methods-project",
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}
