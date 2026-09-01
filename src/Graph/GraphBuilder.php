@@ -164,6 +164,17 @@ class GraphBuilder
     }
 
     /**
+     * The builder methods {@see PendingRequestAnalyzer} found, so a call made through one is
+     * reported on the node that makes it.
+     *
+     * @param  array<string, array<string, mixed>>  $builders  method name => settings
+     */
+    public function setPendingRequestBuilders(array $builders): void
+    {
+        $this->flowExtractor->setPendingRequestBuilders($builders);
+    }
+
+    /**
      * The view roots a view name is resolved against. Must match what
      * {@see BladeViewAnalyzer} was given, or the two
      * disagree about which templates exist.

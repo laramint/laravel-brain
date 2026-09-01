@@ -7,6 +7,7 @@ use LaraMint\LaravelBrain\Analysis\FlowExtractor;
 use LaraMint\LaravelBrain\Analysis\HttpCallExtractor;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
+use LaraMint\LaravelBrain\Analysis\PendingRequestAnalyzer;
 use LaraMint\LaravelBrain\Analysis\ProjectAnalyzer;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
@@ -516,6 +517,164 @@ describe('the config switch', function () {
     });
 });
 
+describe('a request built in another file', function () {
+    /** A flow extractor that knows the project declares these builder methods. */
+    $knowing = function (array $builders): FlowExtractor {
+        $extractor = new FlowExtractor;
+        $extractor->setPendingRequestBuilders($builders);
+
+        return $extractor;
+    };
+
+    it('does not recognise a call through a client method on its own', function () {
+        // Nothing in this file says what `api()` is. Guessing from the name is exactly what the
+        // rule refuses to do, so with no declaration known there is no call here.
+        expect(httpCallsInMethodBody("        \$this->client->api()->get('/me');"))->toBe([]);
+    });
+
+    it('recognises the call once the project declares api(): PendingRequest', function () use ($knowing) {
+        $calls = httpCallsInMethodBody(
+            "        \$this->client->api()->get('/me');",
+            '',
+            $knowing(['api' => []]),
+        );
+
+        expect($calls)->toHaveCount(1)
+            ->and($calls[0]['client'])->toBe('laravel')
+            ->and($calls[0]['method'])->toBe('GET')
+            ->and($calls[0]['url'])->toBe('/me');
+    });
+
+    it('carries the builder settings to the call site', function () use ($knowing) {
+        $calls = httpCallsInMethodBody(
+            "        \$this->client->api()->get('/sale/offers');",
+            '',
+            $knowing(['api' => [
+                'base' => ['url' => 'https://api.allegro.test', 'source' => 'literal', 'configKey' => ''],
+                'timeout' => 5.0,
+                'retryTimes' => 3,
+                'retrySleep' => 100,
+            ]]),
+        );
+
+        expect($calls[0]['url'])->toBe('https://api.allegro.test/sale/offers')
+            ->and($calls[0]['host'])->toBe('api.allegro.test')
+            ->and($calls[0]['timeout'])->toBe(5.0)
+            ->and($calls[0]['retryTimes'])->toBe(3);
+    });
+
+    it('lets the call site override what the builder declared', function () use ($knowing) {
+        $calls = httpCallsInMethodBody(
+            "        \$this->client->api()->timeout(1)->get('/me');",
+            '',
+            $knowing(['api' => ['timeout' => 30.0]]),
+        );
+
+        expect($calls[0]['timeout'])->toBe(1.0);
+    });
+
+    it('recognises a static factory declared the same way', function () use ($knowing) {
+        $calls = httpCallsInMethodBody(
+            "        \Api\Client::request()->post('/orders');",
+            '',
+            $knowing(['request' => []]),
+        );
+
+        expect($calls)->toHaveCount(1)
+            ->and($calls[0]['method'])->toBe('POST');
+    });
+
+    it('still prefers a chain it can see over what a builder name promises', function () use ($knowing) {
+        // `applyTo` is a declared builder *and* a wrapper holding a real chain. The chain is in
+        // this file and is the truth about this call; the declaration is only as good as the name.
+        $calls = httpCallsInMethodBody(
+            "        \App\Retry::applyTo(Http::baseUrl('https://real.test'))->get('/me');",
+            'use Illuminate\Support\Facades\Http;',
+            $knowing(['applyTo' => ['base' => ['url' => 'https://wrong.test', 'source' => 'literal', 'configKey' => '']]]),
+        );
+
+        expect($calls[0]['host'])->toBe('real.test');
+    });
+
+    it('prefers the visible chain for an instance wrapper as well as a static one', function () use ($knowing) {
+        // Same precedence, the other syntax. A policy helper is written both ways in the wild, and
+        // the declared settings must lose to the chain in hand in both.
+        $calls = httpCallsInMethodBody(
+            "        \$this->retry->applyTo(Http::baseUrl('https://real.test'))->get('/me');",
+            'use Illuminate\\Support\\Facades\\Http;',
+            $knowing(['applyTo' => ['base' => ['url' => 'https://wrong.test', 'source' => 'literal', 'configKey' => '']]]),
+        );
+
+        expect($calls)->toHaveCount(1)
+            ->and($calls[0]['host'])->toBe('real.test');
+    });
+
+    it('reports a same-named method on an unrelated class too — the cost of matching by name', function () use ($knowing) {
+        // This is the documented limitation of PendingRequestAnalyzer, pinned so it cannot change
+        // silently: the receiver's class is not resolvable from a method AST, so the name is all
+        // there is. `$this->cache->api()->get(...)` on a class that has nothing to do with HTTP is
+        // reported, and the report says GET on an unreadable address rather than inventing a host.
+        $calls = httpCallsInMethodBody(
+            "        \$this->cache->api()->get('some-key');",
+            '',
+            $knowing(['api' => []]),
+        );
+
+        expect($calls)->toHaveCount(1)
+            ->and($calls[0]['url'])->toBe('some-key')
+            ->and($calls[0]['host'])->toBe('');
+    });
+
+    it('finds the call a client class builds and a service sends, end to end', function () {
+        // The measurement this rule exists for: without the declarations, this project reports
+        // nothing at all; with them, the node that sends the request names the host, the timeout
+        // and the retry policy — assembled out of three files.
+        $root = fixture('http-client-class-project');
+        $routes = (new RouteAnalyzer)->analyze($root);
+        $controllers = (new ControllerAnalyzer)->analyze($root, $routes);
+        $traces = (new MethodTracer)->trace($controllers);
+
+        $nodesWithCalls = function (array $builders) use ($root, $routes, $controllers, $traces): array {
+            $builder = new GraphBuilder;
+            $builder->setPendingRequestBuilders($builders);
+            $graph = $builder->build(
+                'test',
+                $routes,
+                new MiddlewareRegistry([], [], []),
+                $controllers,
+                $traces,
+                [],
+                $root,
+            );
+
+            $found = [];
+            foreach ($graph->nodes() as $node) {
+                foreach ($node->data['httpCalls'] ?? [] as $call) {
+                    $found[$node->id][] = $call;
+                }
+            }
+
+            return $found;
+        };
+
+        expect($nodesWithCalls([]))->toBe([]);
+
+        $builders = (new PendingRequestAnalyzer)->analyze($root);
+        expect(array_keys($builders))->toContain('api')
+            ->and(array_keys($builders))->not->toContain('rows');
+
+        $after = $nodesWithCalls($builders);
+        expect($after)->toHaveCount(1);
+
+        $call = array_values($after)[0][0];
+        expect(strtolower((string) array_key_first($after)))->toContain('offersync')
+            ->and($call['method'])->toBe('GET')
+            ->and($call['url'])->toBe('https://api.allegro.test/sale/offers')
+            ->and($call['timeout'])->toBe(5.0)
+            ->and($call['retryTimes'])->toBe(3);
+    });
+});
+
 describe('the published config entry', function () {
     /**
      * Nodes reporting outgoing calls after a real analysis of the fixture project, with the
@@ -552,6 +711,40 @@ describe('the published config entry', function () {
     });
 
     it('reports none when the entry is false', function () use ($nodesWithCalls) {
+        expect($nodesWithCalls(false))->toBe([]);
+    });
+
+    it('scans for request builders as part of a build, and not when detection is off', function () {
+        // End of the wire: ProjectAnalyzer has to find the declarations and hand them to the graph
+        // builder for a call assembled across three files to appear at all. With the feature off,
+        // that pass does not run, which is visible as the same project reporting nothing.
+        $nodesWithCalls = function (?bool $enabled): array {
+            $config = ['app' => ['name' => 'BuilderPipeline']];
+            if ($enabled !== null) {
+                $config['laravel-brain'] = ['outgoing_http' => ['enabled' => $enabled]];
+            }
+
+            $container = new Container;
+            Container::setInstance($container);
+            $container->instance('config', new Repository($config));
+
+            try {
+                $graph = (new ProjectAnalyzer)->analyze(fixture('http-client-class-project'), function () {})->fullGraph;
+            } finally {
+                Container::setInstance(null);
+            }
+
+            return array_filter($graph->nodes(), fn ($n) => isset($n->data['httpCalls']));
+        };
+
+        $found = $nodesWithCalls(null);
+        expect($found)->toHaveCount(1);
+
+        $call = array_values($found)[0]->data['httpCalls'][0];
+        expect($call['host'])->toBe('api.allegro.test')
+            ->and($call['timeout'])->toBe(5.0)
+            ->and($call['retryTimes'])->toBe(3);
+
         expect($nodesWithCalls(false))->toBe([]);
     });
 

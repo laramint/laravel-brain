@@ -1,0 +1,8 @@
+{
+    "name": "test/http-client-class-project",
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}

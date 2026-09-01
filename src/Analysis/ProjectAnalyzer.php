@@ -102,6 +102,12 @@ class ProjectAnalyzer
 
     private ?int $schemaTimeout = null;
 
+    /** @var string[] class-file search roots, relative to the project root */
+    private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
+
+    /** Whether this build reports the outgoing HTTP calls each node makes. */
+    private bool $detectOutgoingHttp = true;
+
     /** @var callable(string, array): void */
     private $onProgress;
 
@@ -221,9 +227,9 @@ class ProjectAnalyzer
         $this->schemaTimeout = is_numeric($schemaTimeout) && (int) $schemaTimeout > 0
             ? (int) $schemaTimeout
             : null;
-        $this->graphBuilder->setDetectOutgoingHttp(
-            (bool) config('laravel-brain.outgoing_http.enabled', true),
-        );
+        $this->sourcePaths = $sourcePaths;
+        $this->detectOutgoingHttp = (bool) config('laravel-brain.outgoing_http.enabled', true);
+        $this->graphBuilder->setDetectOutgoingHttp($this->detectOutgoingHttp);
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
         $this->graphBuilder->setCacheOperationsEnabled(
@@ -581,6 +587,16 @@ class ProjectAnalyzer
         $facadeRegistry->resolveWith($bindingRegistry);
         $facadeCount = count($facadeRegistry->all());
         $this->emit('step:done', ['step' => 'facades', 'count' => $facadeCount, 'unit' => 'facade', 'message' => "    Found {$facadeCount} facade(s)"]);
+
+        // A project builds its requests in one place and sends them in another, so the methods
+        // that build them have to be known before any method that sends one is charted. Skipped
+        // entirely when detection is off: it is a pass over the source like any other.
+        if ($this->detectOutgoingHttp) {
+            $this->emit('step:start', ['step' => 'http_builders', 'label' => 'Scanning request builders', 'message' => '  → Scanning HTTP request builders...']);
+            $builders = (new PendingRequestAnalyzer(null, $this->sourcePaths))->analyze($projectRoot);
+            $this->graphBuilder->setPendingRequestBuilders($builders);
+            $this->emit('step:done', ['step' => 'http_builders', 'count' => count($builders), 'unit' => 'builder', 'message' => '    Found '.count($builders).' HTTP request builder method(s)']);
+        }
 
         // Release the ClassMethod AST cache accumulated during tracing — GraphBuilder has its own
         // parse cache and does not need MethodTracer's cached nodes. Freeing this before the

@@ -14,6 +14,7 @@ php artisan brain:scan
         ├─ ConsoleAnalyzer    → discovers Artisan commands and scheduled tasks
         ├─ ChannelAnalyzer    → discovers broadcast channels
         ├─ FilamentAnalyzer   → discovers panels, resources, pages, widgets, relation managers
+        ├─ PendingRequestAnalyzer → finds the methods that build outgoing HTTP requests
         └─ GraphBuilder       → assembles nodes + edges, flags fat classes
                 │
                 └─ Writes JSON → storage/app/laravel-brain/
@@ -109,6 +110,43 @@ than guessing.
 
 Declared timeouts and retries are shown, and so is their absence — a request with no timeout waits
 as long as the third party takes, which is worth seeing before an incident rather than during one.
+
+### Requests built in one file and sent in another
+
+Most applications do not call `Http::get()` at the point of use. They keep a client class that hands
+out a configured request:
+
+```php
+class AllegroHttpClient
+{
+    public function api(): PendingRequest
+    {
+        return TransientFailureRetry::applyTo(Http::baseUrl($this->url()))->timeout(5);
+    }
+}
+
+// elsewhere
+$this->client->api()->get('/me');
+```
+
+Read one method at a time, the call site is a chain rooted in `$this->client->api()` and says
+nothing. Measured on a 60-module application: 50 files made HTTP calls and the graph named one.
+
+So a scan first collects the methods the project *declares* to return
+`Illuminate\Http\Client\PendingRequest`, and a chain rooted in one of them is an outgoing call.
+Their base URL, timeout and retry travel to the call site, including through a policy wrapper that
+takes a request and returns it — so the panel shows the host and the timeout even though neither is
+written anywhere near the `get()`.
+
+Only a written return type counts. A method called `api()` that returns `array`, or one with no
+return type, is not a builder and never becomes one.
+
+**The limitation, in full:** the collected builders are keyed by **method name**, not by the class
+the receiver resolves to. `$this->client->api()` gives the name and nothing else — the type of
+`$this->client` is declared in the caller's class, and following it would need cross-file type
+resolution the scanner does not do. So an unrelated class with a same-named method feeding a chain
+into a `get()` is reported as well, and where two declarations of one name disagree about their base
+URL or timeout, neither setting is reported rather than the wrong one.
 
 Detection is on by default and switches off in one place, which skips the scan rather than
 discarding its result:

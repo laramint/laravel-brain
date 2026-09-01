@@ -88,6 +88,18 @@ class FlowExtractor
     }
 
     /**
+     * Teach the outgoing-call classifier which method names build a request, so a call made
+     * through one — `$this->client->api()->get('/me')` — is recognised even though the `Http`
+     * facade it was built from is in another file.
+     *
+     * @param  array<string, array<string, mixed>>  $builders  method name => settings
+     */
+    public function setPendingRequestBuilders(array $builders): void
+    {
+        $this->httpCalls->setPendingRequestBuilders($builders);
+    }
+
+    /**
      * Extract flow steps from a method AST.
      *
      * @return array[]

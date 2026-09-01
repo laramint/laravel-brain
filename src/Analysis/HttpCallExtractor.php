@@ -132,6 +132,9 @@ class HttpCallExtractor
 
     private const GUZZLE_CLIENT = 'GuzzleHttp\\Client';
 
+    /** The type a method declares when it hands a caller a request to finish and send. */
+    public const PENDING_REQUEST = 'Illuminate\\Http\\Client\\PendingRequest';
+
     /**
      * Expressions scanned for outgoing calls in this process.
      *
@@ -152,6 +155,27 @@ class HttpCallExtractor
 
     /** @var array<string, array<string, mixed>> variable label => what a curl handle has been told */
     private array $curlHandles = [];
+
+    /**
+     * Method names the project declares to return a pending request, with the settings each was
+     * read to apply. Gathered once per scan by {@see PendingRequestAnalyzer}; this is knowledge
+     * about the project rather than about the method being walked, so {@see reset()} leaves it
+     * alone.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private array $pendingRequestBuilders = [];
+
+    /**
+     * Teach the extractor which method names build a request, so that `$client->api()->get(...)`
+     * is read as the outgoing call it is.
+     *
+     * @param  array<string, array<string, mixed>>  $builders  method name => settings
+     */
+    public function setPendingRequestBuilders(array $builders): void
+    {
+        $this->pendingRequestBuilders = $builders;
+    }
 
     /**
      * Forget every client seen so far. Called at the start of each method: variables do not
@@ -309,6 +333,21 @@ class HttpCallExtractor
 
         while ($node instanceof Node\Expr\MethodCall) {
             $name = $node->name instanceof Node\Identifier ? $node->name->toString() : '';
+
+            // `$this->client->api()->get('/me')`, where some class declares `api(): PendingRequest`.
+            // The chain roots here: whatever built the request did so in another file, and this is
+            // as far back as a method AST can see. Checked before the name is read as a builder
+            // step, so a project that declares `timeout(): PendingRequest` is still rooted at its
+            // own method rather than swallowed as configuration.
+            $declared = $this->declaredBuilderSettings($name);
+            if ($declared !== null) {
+                // Both can apply at once — `$this->retry->applyTo(Http::baseUrl(...))` is a
+                // declared builder *and* a wrapper around a real chain. What the wrapper is
+                // holding is read from this file and outranks what the name is known to build
+                // elsewhere, which is only ever as good as the name.
+                return $settings + ($this->wrappedRequestSettings($node) ?? []) + $declared;
+            }
+
             $this->collectPendingRequestSetting($name, $node->args, $settings);
             $node = $node->var;
         }
@@ -333,11 +372,170 @@ class HttpCallExtractor
         // roots in the helper rather than in `Http`. This does not guess what the helper returns:
         // the argument WAS a request, and the result is being used as one.
         $wrapped = $this->wrappedRequestSettings($node);
-        if ($wrapped !== null) {
-            return $settings + $wrapped;
+
+        // The same declaration written as a static factory: `ApiClient::request()->get(...)`.
+        // Read after the wrapper, so a name known to build requests never displaces a chain that
+        // is right here to be read.
+        $declared = $node instanceof Node\Expr\StaticCall
+            ? $this->declaredBuilderSettings($node->name instanceof Node\Identifier ? $node->name->toString() : '')
+            : null;
+
+        if ($wrapped !== null || $declared !== null) {
+            return $settings + ($wrapped ?? []) + ($declared ?? []);
         }
 
         return null;
+    }
+
+    /**
+     * The settings of a declared builder method of this name, or null when no class in the project
+     * declares one.
+     *
+     * Keyed on the name alone. What the receiver's class actually is cannot be answered from a
+     * method AST, and the alternative — inferring a client from how the name reads — is exactly
+     * the guess this rule exists to avoid. See the class docblock of {@see PendingRequestAnalyzer}
+     * for what that costs.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function declaredBuilderSettings(string $method): ?array
+    {
+        return $method === '' ? null : ($this->pendingRequestBuilders[$method] ?? null);
+    }
+
+    /**
+     * What a builder method applies to every request it hands out — its base URL, its timeout, its
+     * retry policy — read from the chain it returns.
+     *
+     * Returns null when nothing in the method resolves to an HTTP chain, which is the honest
+     * answer for a body that assembles its request somewhere this cannot follow. The call site is
+     * still reported; it is reported without a host, rather than with a guessed one.
+     *
+     * @param  array<string, string>  $useMap
+     * @return array<string, mixed>|null
+     */
+    public function builderSettings(Node\Stmt\ClassMethod $method, array $useMap): ?array
+    {
+        $this->reset($useMap);
+
+        // `applyTo(PendingRequest $request): PendingRequest { return $request->retry(3, 100); }`
+        // — the chain roots at a parameter rather than at the facade, and the retry policy it
+        // applies is the whole reason such a method exists. A parameter declared to be a request
+        // is treated as one, which is the same declaration-driven signal as the return type.
+        foreach ($method->params as $param) {
+            if (! self::namesPendingRequest($param->type, $useMap)) {
+                continue;
+            }
+            $label = $param->var instanceof Node\Expr\Variable ? $this->variableLabel($param->var) : null;
+            if ($label !== null) {
+                $this->laravelClients[$label] = [];
+            }
+        }
+
+        return $this->settingsReturnedBy($method->stmts ?? []);
+    }
+
+    /**
+     * @param  Node\Stmt[]  $stmts
+     * @return array<string, mixed>|null
+     */
+    private function settingsReturnedBy(array $stmts): ?array
+    {
+        $settings = null;
+
+        foreach ($stmts as $stmt) {
+            // `$request = Http::baseUrl(...)->timeout(5);` parks a request under a name, exactly as
+            // it does inside a method that goes on to send it — so the `return $request;` below
+            // resolves through the same bookkeeping.
+            if ($stmt instanceof Node\Stmt\Expression && $stmt->expr instanceof Node\Expr\Assign) {
+                $this->remember($stmt->expr);
+            }
+
+            if ($stmt instanceof Node\Stmt\Return_ && $stmt->expr !== null) {
+                $returned = $this->laravelChain($stmt->expr);
+                if ($returned !== null) {
+                    // An earlier return is nearer the top of the method and wins nothing; the last
+                    // one read stands, and where two disagree the analyzer drops what differs.
+                    $settings = $returned;
+                }
+            }
+
+            foreach ($this->nestedStmtLists($stmt) as $nested) {
+                $inner = $this->settingsReturnedBy($nested);
+                if ($inner !== null) {
+                    $settings = $inner;
+                }
+            }
+        }
+
+        return $settings;
+    }
+
+    /**
+     * The statement lists a statement holds, so a request built inside a condition is still read.
+     *
+     * @return iterable<Node\Stmt[]>
+     */
+    private function nestedStmtLists(Node\Stmt $stmt): iterable
+    {
+        if ($stmt instanceof Node\Stmt\If_) {
+            yield $stmt->stmts;
+            foreach ($stmt->elseifs as $elseif) {
+                yield $elseif->stmts;
+            }
+            if ($stmt->else !== null) {
+                yield $stmt->else->stmts;
+            }
+        }
+        if ($stmt instanceof Node\Stmt\TryCatch) {
+            yield $stmt->stmts;
+        }
+        if ($stmt instanceof Node\Stmt\Foreach_
+            || $stmt instanceof Node\Stmt\For_
+            || $stmt instanceof Node\Stmt\While_
+        ) {
+            yield $stmt->stmts;
+        }
+    }
+
+    /**
+     * Whether a written return type says `Illuminate\Http\Client\PendingRequest`.
+     *
+     * Only what is written counts. A nullable or union type is read through — `?PendingRequest` and
+     * `PendingRequest|null` both still promise a request — but a method with no return type
+     * declares nothing, and a project's own class that happens to be called `PendingRequest`
+     * resolves to its own namespace and is not this one.
+     *
+     * @param  array<string, string>  $useMap
+     */
+    public static function namesPendingRequest(?Node $type, array $useMap): bool
+    {
+        if ($type instanceof Node\NullableType) {
+            return self::namesPendingRequest($type->type, $useMap);
+        }
+
+        if ($type instanceof Node\UnionType || $type instanceof Node\IntersectionType) {
+            foreach ($type->types as $member) {
+                if (self::namesPendingRequest($member, $useMap)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (! $type instanceof Node\Name) {
+            return false;
+        }
+
+        $resolved = PhpFileParser::resolvedName($type);
+        if ($resolved !== null) {
+            return $resolved === self::PENDING_REQUEST;
+        }
+
+        $written = $type->toString();
+
+        return ($useMap[$written] ?? $written) === self::PENDING_REQUEST;
     }
 
     /**
