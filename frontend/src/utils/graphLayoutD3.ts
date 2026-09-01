@@ -212,30 +212,68 @@ export function layoutBreadthFirst(
   let cursor = 0
   for (const l of [...layers.keys()].sort((a, b) => a - b)) {
     const layerNodes = layers.get(l)!.map((id) => byId.get(id)!)
+
+    // A layer is one line only while it fits on one. Past that it is packed into a block of
+    // roughly screen-shaped proportions, because a layer's width is set by how many nodes
+    // happen to sit at that depth and nothing bounds it: a graph whose entry points are mostly
+    // unconnected — 187 models, or 211 events of which half nothing listens to — puts every one
+    // of them at level 0 and lays them in a single row kilometres wide, which fits on screen
+    // only at a zoom where no label can be read. Wrapping keeps the layer a layer: the reading
+    // order within it is unchanged, and it still occupies its own band between its neighbours.
+    const perLine = wrapWidth(layerNodes.length)
+
     if (rankDir === 'TB') {
-      const rowWidth =
-        layerNodes.reduce((sum, n) => sum + n.width, 0) + gapWithinLayer * (layerNodes.length - 1)
-      const rowHeight = largestOf(layerNodes, (n) => n.height)
-      let x = -rowWidth / 2
-      for (const node of layerNodes) {
-        node.x = x + node.width / 2
-        node.y = cursor + rowHeight / 2
-        x += node.width + gapWithinLayer
+      const lines = chunk(layerNodes, perLine)
+      let lineTop = cursor
+      for (const line of lines) {
+        const rowWidth =
+          line.reduce((sum, n) => sum + n.width, 0) + gapWithinLayer * (line.length - 1)
+        const rowHeight = largestOf(line, (n) => n.height)
+        let x = -rowWidth / 2
+        for (const node of line) {
+          node.x = x + node.width / 2
+          node.y = lineTop + rowHeight / 2
+          x += node.width + gapWithinLayer
+        }
+        lineTop += rowHeight + gapWithinLayer
       }
-      cursor += rowHeight + gapBetweenLayers
+      cursor = lineTop - gapWithinLayer + gapBetweenLayers
     } else {
-      const columnHeight =
-        layerNodes.reduce((sum, n) => sum + n.height, 0) + gapWithinLayer * (layerNodes.length - 1)
-      const columnWidth = largestOf(layerNodes, (n) => n.width)
-      let y = -columnHeight / 2
-      for (const node of layerNodes) {
-        node.x = cursor + columnWidth / 2
-        node.y = y + node.height / 2
-        y += node.height + gapWithinLayer
+      const lines = chunk(layerNodes, perLine)
+      let lineLeft = cursor
+      for (const line of lines) {
+        const columnHeight =
+          line.reduce((sum, n) => sum + n.height, 0) + gapWithinLayer * (line.length - 1)
+        const columnWidth = largestOf(line, (n) => n.width)
+        let y = -columnHeight / 2
+        for (const node of line) {
+          node.x = lineLeft + columnWidth / 2
+          node.y = y + node.height / 2
+          y += node.height + gapWithinLayer
+        }
+        lineLeft += columnWidth + gapWithinLayer
       }
-      cursor += columnWidth + gapBetweenLayers
+      cursor = lineLeft - gapWithinLayer + gapBetweenLayers
     }
   }
+}
+
+/**
+ * How many nodes of an oversized layer go on one line.
+ *
+ * Square-root, so the block grows in both directions instead of one; widened slightly because a
+ * card is wider than it is tall and a literal square reads as a column. Layers at or under the
+ * threshold are returned whole and lay out exactly as before.
+ */
+function wrapWidth(count: number, maxOnOneLine = 12): number {
+  return count <= maxOnOneLine ? count : Math.ceil(Math.sqrt(count) * 1.4)
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  if (size >= items.length) return [items]
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
 }
 
 export function layoutForce(nodes: LayoutNode[], edges: LayoutEdge[]): void {

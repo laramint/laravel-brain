@@ -224,6 +224,7 @@ const CATEGORY_ICONS: Record<string, IconKey> = {
   'Broadcast Channels': 'broadcast',
   Schedules: 'clock',
   'Model ERD': 'box',
+  'Event Choreography': 'zap',
   Other: 'route',
 }
 
@@ -243,6 +244,7 @@ function categoryBucket(tab: TabEntry): string {
   if (tab.category === 'Channel') return 'Broadcast Channels'
   if (tab.category === 'Schedule') return 'Schedules'
   if (tab.category === 'ERD') return 'Model ERD'
+  if (tab.category === 'Events') return 'Event Choreography'
   if (tab.category === 'Filament') {
     const p = tab.panelId ?? ''
     return p ? `Filament · ${p.charAt(0).toUpperCase()}${p.slice(1)} Panel` : 'Filament'
