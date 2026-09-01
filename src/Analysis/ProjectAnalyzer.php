@@ -29,6 +29,21 @@ class AnalysisResult
         public int $totalFilamentResources = 0,
         /** @var string[] "FQCN::method" of methods that dispatch a job Brain couldn't resolve statically */
         public array $unresolvedDispatchers = [],
+        /**
+         * Nodes no edge touches, by type. A pass that builds nodes and forgets their edges lands
+         * here in full.
+         *
+         * @var array<string, int>
+         */
+        public array $isolatedNodes = [],
+        /**
+         * Nodes that reached no tab, by type — the stricter question, and the one that decides
+         * whether a reader ever sees them. A node can have edges and still sit in a cluster no
+         * tab seed reaches, which is how 22 correctly-wired AI nodes were measured invisible.
+         *
+         * @var array<string, int>
+         */
+        public array $nodesOutsideTabs = [],
     ) {}
 }
 
@@ -679,6 +694,14 @@ class ProjectAnalyzer
             }
         }
 
+        // Agents get a tab of their own for the same reason models do: nothing guarantees a route
+        // reaches them, and a node in no tab is invisible however well the graph knows about it.
+        $ai = $this->graphSplitter->buildAiTab($fullGraph, $projectName, $analyzedAt);
+        if ($ai !== null) {
+            $split['subgraphs'][$ai['id']] = $ai['graph'];
+            $split['manifest'][] = $ai['manifest'];
+        }
+
         $this->emit('step:done', ['step' => 'split', 'count' => count($split['subgraphs']), 'unit' => 'tab', 'message' => '    '.count($split['subgraphs']).' tab(s) generated']);
 
         $manifestJson = $this->graphSplitter->buildManifestJson(
@@ -697,6 +720,8 @@ class ProjectAnalyzer
             totalChannels: count($channels),
             totalFilamentResources: $filamentResourceCount,
             unresolvedDispatchers: $this->methodTracer->unresolvedDispatchers(),
+            isolatedNodes: $fullGraph->isolatedNodeCountsByType(),
+            nodesOutsideTabs: GraphSplitter::nodesOutsideTabs($fullGraph, $split['subgraphs']),
         );
 
         $this->emit('analysis:done', [

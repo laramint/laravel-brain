@@ -9,6 +9,7 @@ use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Graph\Graph;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
+use LaraMint\LaravelBrain\Graph\GraphSplitter;
 
 /**
  * The graph the AI pass produces on top of a normally-built one, so the caller edges have real
@@ -149,4 +150,104 @@ it('leaves the graph untouched for a project that does not use the SDK', functio
 
     expect($graph->nodeCount())->toBe($before);
     expect(array_filter($graph->nodes(), fn ($n): bool => str_starts_with($n->type, 'ai_')))->toBe([]);
+});
+
+it('creates the caller node when no other pass reached that class', function () {
+    $graph = aiGraph();
+
+    // AnswerTicketJob is dispatched from nowhere the tracer walks, so before the AI pass runs
+    // there is no node for it — and without one the caller edge was silently dropped.
+    $callerId = 'app_jobs_answerticketjob::handle';
+
+    expect($graph->hasNode($callerId))->toBeTrue();
+    expect($graph->getNode($callerId)?->type)->toBe('job');
+    expect(aiEdges($graph, 'ai-caller-to-agent'))
+        ->toContain($callerId.' -> ai_agent::App\\Ai\\Agents\\InjectedToolsAgent');
+});
+
+it('wires tools supplied at construction, labelled apart from declared ones', function () {
+    $graph = aiGraph();
+
+    $supplied = [];
+    foreach ($graph->edges() as $edge) {
+        if ($edge->type === 'ai-agent-to-tool' && $edge->label === 'may call (supplied)') {
+            $supplied[] = $edge->source.' -> '.$edge->target;
+        }
+    }
+
+    expect($supplied)
+        ->toContain('ai_agent::App\\Ai\\Agents\\InjectedToolsAgent -> ai_tool::App\\Ai\\Tools\\SearchOrdersTool')
+        ->toContain('ai_agent::App\\Ai\\Agents\\InjectedToolsAgent -> ai_tool::App\\Ai\\Tools\\RefundTool');
+});
+
+it('says on the node that tools are decided at runtime', function () {
+    $graph = aiGraph();
+
+    expect($graph->getNode('ai_agent::App\\Ai\\Agents\\InjectedToolsAgent')?->data)
+        ->toHaveKey('toolsDecidedAtRuntime', true)
+        ->toHaveKey('injectedTools');
+
+    expect($graph->getNode('ai_agent::App\\Ai\\Agents\\SupportAgent')?->data)
+        ->not->toHaveKey('toolsDecidedAtRuntime');
+});
+
+it('leaves no tool and no prompted agent without an edge', function () {
+    $graph = aiGraph();
+
+    $isolated = [];
+    foreach ($graph->nodes() as $node) {
+        $isolated[$node->id] = str_starts_with($node->type, 'ai_');
+    }
+    foreach ($graph->edges() as $edge) {
+        $isolated[$edge->source] = false;
+        $isolated[$edge->target] = false;
+    }
+    $stranded = array_keys(array_filter($isolated));
+
+    expect($graph->isolatedNodeCountsByType())->not->toHaveKey('ai_tool');
+
+    // ClassifierAgent and DraftAgent are prompted from nowhere and wire no tools, so they really
+    // are on their own — an agent no code path reaches is a fact about the application, not a
+    // wiring bug, and the AI tab is what keeps them visible anyway.
+    expect($stranded)->toBe([
+        'ai_agent::App\\Ai\\Agents\\DraftAgent',
+        'ai_agent::App\\Ai\\Agents\\ClassifierAgent',
+    ]);
+});
+
+it('puts every AI node in the AI Agents tab', function () {
+    $graph = aiGraph();
+
+    $tab = (new GraphSplitter)->buildAiTab($graph, 'ai-test', '2026-01-01T00:00:00Z');
+
+    expect($tab)->not->toBeNull();
+    expect($tab['manifest']->category)->toBe('AI');
+    expect($tab['manifest']->label)->toBe('AI Agents');
+
+    $aiNodeIds = [];
+    foreach ($graph->nodes() as $node) {
+        if (str_starts_with($node->type, 'ai_')) {
+            $aiNodeIds[] = $node->id;
+        }
+    }
+
+    expect($aiNodeIds)->not->toBeEmpty();
+    foreach ($aiNodeIds as $id) {
+        expect($tab['graph']->hasNode($id))->toBeTrue();
+    }
+
+    // And the callers come with them, so the tab says where the calls come from.
+    expect($tab['graph']->hasNode('app_jobs_answerticketjob::handle'))->toBeTrue();
+});
+
+it('builds no AI tab for a project without agents', function () {
+    $root = fixture('laravel-project');
+
+    $routes = (new RouteAnalyzer)->analyze($root);
+    $controllers = (new ControllerAnalyzer)->analyze($root, $routes);
+    $traces = (new MethodTracer)->trace($controllers, [], $root);
+
+    $graph = (new GraphBuilder)->build('no-ai', $routes, new MiddlewareRegistry([], [], []), $controllers, $traces, [], $root);
+
+    expect((new GraphSplitter)->buildAiTab($graph, 'no-ai', '2026-01-01T00:00:00Z'))->toBeNull();
 });

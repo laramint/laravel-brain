@@ -47,6 +47,15 @@ class AiAgentDefinition
         public array $toolAgents,
         /** @var list<string> FQCNs returned by tools() that Brain could not classify */
         public array $unresolvedTools,
+        /**
+         * Whether tools() builds its list from something no static reading can enumerate — a
+         * constructor-injected property, a container call, a generator. True means "this agent
+         * has tools and Brain cannot name them", which is a different statement from an empty
+         * tools list and has to reach the reader as one.
+         */
+        public bool $toolsAreDynamic,
+        /** @var list<string> tool FQCNs handed to the agent's constructor where it is built */
+        public array $injectedTools,
         /** Whether the class implements HasTools — without it the SDK never calls tools() at all. */
         public bool $declaresHasTools,
         /** An abstract base carries configuration for readers, but is never itself prompted. */
@@ -79,6 +88,13 @@ class AiAgentCallSite
         public string $callerFqcn,
         public string $callerMethod,
         public string $agentFqcn,
+        /**
+         * Classes named inside the argument list of a `new <Agent>(...)` at this site. An agent
+         * whose own tools() is unreadable is often handed its tools right here.
+         *
+         * @var list<string>
+         */
+        public array $constructionArgClasses = [],
     ) {}
 }
 
@@ -205,6 +221,15 @@ class AiAnalyzer
     private bool $enabled;
 
     /**
+     * Every class named by every class the scan parsed, kept so a "tool provider" — a class whose
+     * job is to build a list of tools for somebody else — can be recognised once the tool set is
+     * known. Populated during the scan and read at the end of it.
+     *
+     * @var array<string, list<string>>
+     */
+    private array $classToolRefs = [];
+
+    /**
      * @param  string[]  $paths  directories (or glob patterns) holding application classes
      * @param  bool  $enabled  the `laravel-brain.ai.enabled` switch, which is a different question
      *                         from whether the application uses the SDK: off means "I use it and
@@ -259,6 +284,8 @@ class AiAnalyzer
             return $empty;
         }
 
+        $this->classToolRefs = [];
+
         $files = $this->phpFiles($projectRoot);
         if ($files === []) {
             return $empty;
@@ -293,6 +320,9 @@ class AiAnalyzer
         foreach ($agents as $agent) {
             $this->classifyToolReferences($agent, $agents, $tools);
         }
+
+        $this->attributeInjectedTools($agents, $tools, $callSites);
+        $this->classToolRefs = [];
 
         // Abstract bases stay in the lookup maps — subclass promotion and inheritance need them —
         // but they are not returned. Nothing prompts an abstract agent, and because PHP does not
@@ -380,13 +410,15 @@ class AiAnalyzer
                 );
             }
 
+            $this->classToolRefs[$fqcn] = $this->referencedClasses($class, $useMap);
+
             if ($callSites !== null) {
-                foreach ($this->agentReferencesIn($class, $useMap, $agents) as [$method, $agentFqcn]) {
+                foreach ($this->agentReferencesIn($class, $useMap, $agents) as [$method, $agentFqcn, $argClasses]) {
                     if ($agentFqcn === $fqcn) {
                         continue;
                     }
                     $key = $fqcn.'::'.$method.'::'.$agentFqcn;
-                    $callSites[$key] ??= new AiAgentCallSite($fqcn, $method, $agentFqcn);
+                    $callSites[$key] = new AiAgentCallSite($fqcn, $method, $agentFqcn, $argClasses);
                 }
             }
         }
@@ -508,6 +540,11 @@ class AiAnalyzer
             tools: $toolRefs,
             toolAgents: [],
             unresolvedTools: [],
+            toolsAreDynamic: in_array('tools', $declared, true)
+                ? $this->toolsBodyIsUnreadable($this->method($class, 'tools'))
+                : ($parent !== null && $parent->toolsAreDynamic),
+            // Filled once every call site is known; see attributeInjectedTools().
+            injectedTools: [],
             declaresHasTools: in_array('HasTools', $contracts, true),
             isAbstract: $class->isAbstract(),
         );
@@ -657,12 +694,111 @@ class AiAnalyzer
     }
 
     /**
+     * Whether tools() decides its list somewhere no static reading can follow.
+     *
+     * The distinction this draws is the whole point: `return [];` is an agent with no tools, and
+     * `return $this->tools;` is an agent WITH tools that cannot be named here. Both leave the
+     * resolved list empty, and reporting them the same way tells the reader nothing about the
+     * second — which is the shape every constructor-injected agent has.
+     *
+     * A body with no return at all (a generator, say) counts as unreadable for the same reason.
+     */
+    private function toolsBodyIsUnreadable(?Node\Stmt\ClassMethod $method): bool
+    {
+        if ($method === null || $method->stmts === null) {
+            return false;
+        }
+
+        /** @var Node\Stmt\Return_[] $returns */
+        $returns = $this->finder->findInstanceOf($method, Node\Stmt\Return_::class);
+
+        if ($returns === []) {
+            return $method->stmts !== [];
+        }
+
+        foreach ($returns as $return) {
+            if (! $return->expr instanceof Node\Expr\Array_) {
+                return true;
+            }
+
+            foreach ($return->expr->items as $item) {
+                if ($item === null || $item->unpack || ! self::isClassReference($item->value)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether an expression names a class outright, in one of the forms referencedClasses() reads.
+     */
+    private static function isClassReference(Node\Expr $expr): bool
+    {
+        return ($expr instanceof Node\Expr\New_ && $expr->class instanceof Node\Name)
+            || ($expr instanceof Node\Expr\StaticCall && $expr->class instanceof Node\Name)
+            || ($expr instanceof Node\Expr\ClassConstFetch && $expr->class instanceof Node\Name);
+    }
+
+    /**
+     * Give an agent the tools it is handed where it is constructed.
+     *
+     * An agent that takes its tools through the constructor cannot name them itself, but the code
+     * that builds it can, and often does so through a provider: `new ChatAssistantAgent(tools:
+     * resolve(ChatToolProvider::class)->toolsFor($user))`. Any class named inside those arguments
+     * whose own body instantiates recognised tools is treated as supplying them.
+     *
+     * A class that is itself an agent or a tool is never treated as a provider — an agent naming
+     * its own tools is tools(), which is already read, and it must not be double-counted as a
+     * bundle for whoever constructs it.
+     *
+     * @param  array<string, AiAgentDefinition>  $agents
+     * @param  array<string, AiToolDefinition>  $tools
+     * @param  AiAgentCallSite[]  $callSites
+     */
+    private function attributeInjectedTools(array $agents, array $tools, array $callSites): void
+    {
+        /** @var array<string, list<string>> $providers */
+        $providers = [];
+
+        foreach ($this->classToolRefs as $owner => $refs) {
+            if (isset($agents[$owner]) || isset($tools[$owner])) {
+                continue;
+            }
+            $provided = array_values(array_filter($refs, static fn (string $ref): bool => isset($tools[$ref])));
+            if ($provided !== []) {
+                $providers[$owner] = $provided;
+            }
+        }
+
+        foreach ($callSites as $site) {
+            $agent = $agents[$site->agentFqcn] ?? null;
+            if ($agent === null) {
+                continue;
+            }
+
+            foreach ($site->constructionArgClasses as $named) {
+                // A tool passed straight into the constructor counts too, not just a provider.
+                $supplied = isset($tools[$named]) ? [$named] : ($providers[$named] ?? []);
+
+                foreach ($supplied as $toolFqcn) {
+                    if (! in_array($toolFqcn, $agent->injectedTools, true)
+                        && ! in_array($toolFqcn, $agent->tools, true)) {
+                        $agent->injectedTools[] = $toolFqcn;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Methods of $class that name one of the known agents, in any statically resolvable form:
      * `new Agent`, `Agent::class`, `Agent::make()`, or an `Agent` type on a parameter.
      *
      * @param  array<string, string>  $useMap
      * @param  array<string, AiAgentDefinition>  $agents
-     * @return list<array{0: string, 1: string}> [methodName, agentFqcn]
+     * @return list<array{0: string, 1: string, 2: list<string>}> [methodName, agentFqcn, constructionArgClasses]
      */
     private function agentReferencesIn(Node\Stmt\Class_ $class, array $useMap, array $agents): array
     {
@@ -674,19 +810,42 @@ class AiAnalyzer
             }
 
             $method = $stmt->name->toString();
-            foreach ($this->referencedClasses($stmt, $useMap) as $fqcn) {
-                if (isset($agents[$fqcn])) {
-                    $found[$method.'::'.$fqcn] = [$method, $fqcn];
+
+            $record = static function (string $fqcn, array $argClasses) use (&$found, $method, $agents): void {
+                if (! isset($agents[$fqcn])) {
+                    return;
                 }
+                $key = $method.'::'.$fqcn;
+                $found[$key] = [
+                    $method,
+                    $fqcn,
+                    array_values(array_unique(array_merge($found[$key][2] ?? [], $argClasses))),
+                ];
+            };
+
+            // Constructions first, and separately from the rest: the argument list of a
+            // `new ChatAssistantAgent(instructions: …, tools: …)` is where an agent that builds
+            // its tools from an injected property is actually given them, and that is only
+            // visible while the New_ node is in hand.
+            /** @var Node\Expr\New_[] $constructions */
+            $constructions = $this->finder->findInstanceOf($stmt, Node\Expr\New_::class);
+            foreach ($constructions as $construction) {
+                if ($construction->class instanceof Node\Name) {
+                    $record(
+                        self::resolve($construction->class, $useMap),
+                        $this->referencedClasses($construction->args, $useMap),
+                    );
+                }
+            }
+
+            foreach ($this->referencedClasses($stmt, $useMap) as $fqcn) {
+                $record($fqcn, []);
             }
 
             foreach ($stmt->params as $param) {
                 $type = $param->type;
                 if ($type instanceof Node\Name) {
-                    $fqcn = self::resolve($type, $useMap);
-                    if (isset($agents[$fqcn])) {
-                        $found[$method.'::'.$fqcn] = [$method, $fqcn];
-                    }
+                    $record(self::resolve($type, $useMap), []);
                 }
             }
         }
@@ -701,12 +860,13 @@ class AiAnalyzer
      * an agent's tools() can legitimately come back short — those references land in
      * unresolvedTools rather than being guessed at.
      *
+     * @param  Node|Node[]|null  $node
      * @param  array<string, string>  $useMap
      * @return list<string>
      */
-    private function referencedClasses(?Node $node, array $useMap): array
+    private function referencedClasses($node, array $useMap): array
     {
-        if ($node === null) {
+        if ($node === null || $node === []) {
             return [];
         }
 

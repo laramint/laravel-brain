@@ -636,6 +636,22 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       <span className="prop-value">{(node.data.contracts as string[]).join(', ')}</span>
                     </div>
                   )}
+                  {node.data?.toolsDecidedAtRuntime === true && (
+                    <div className="prop-row">
+                      <span className="prop-key">tools()</span>
+                      <span className="prop-value">
+                        decided at runtime — this agent has tools Brain cannot name from tools()
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.injectedTools) && node.data.injectedTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">supplied tools</span>
+                      <span className="prop-value">
+                        {(node.data.injectedTools as string[]).length} handed to the constructor where the agent is built
+                      </span>
+                    </div>
+                  )}
                   {Array.isArray(node.data?.unwiredTools) && node.data.unwiredTools.length > 0 && (
                     <div className="prop-row">
                       <span className="prop-key" style={{ color: '#FF6D00' }}>unwired tools</span>

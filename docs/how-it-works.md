@@ -168,6 +168,33 @@ Attributes are **not** inherited — PHP does not hand class attributes to subcl
 
 Alongside the model, the agent node carries provider, max steps, max tokens, temperature, top P, timeout, strict mode, and the contracts the class implements (`HasTools`, `HasStructuredOutput`, `Conversational`, `RemembersConversations`, `Approvable`, …). Two mismatches get their own line: a `tools()` method on a class that never implements `HasTools` (the SDK's `resolveTools()` returns early, so the model is never offered them, and Brain does not draw the edges), and a tool reference `tools()` builds at runtime that no static reading can resolve.
 
+### Tools an agent cannot name itself
+
+An agent that takes its tools through the constructor cannot name them:
+
+```php
+public function tools(): iterable
+{
+    return $this->tools;   // constructor-injected
+}
+```
+
+That is genuinely unreadable, and Brain says so — the node is marked *tools decided at runtime*, which is a different statement from "no tools" and reaches the reader as one. It then looks where the agent is built: any class named in the constructor arguments whose own body instantiates recognised tools is treated as supplying them, so
+
+```php
+new ChatAssistantAgent(tools: resolve(ChatToolProvider::class)->toolsFor($user))
+```
+
+wires the agent to every tool that provider instantiates. Those edges are labelled `may call (supplied)`, apart from the ones the agent declares itself, because the two are known with different certainty. A class that is itself an agent or a tool is never treated as a provider.
+
+### The AI Agents tab
+
+Agents get a standalone tab, like the Model ERD, rather than relying on a route reaching them. That is a measurement, not a preference: on a real application with 5 agents and 17 tools, all six call sites resolved to a queued job, two services and a listener helper that no route reaches statically, so every AI node sat in the full graph and in **no tab at all** — invisible to anyone opening the viewer. The tab shows each agent, the tools it can call, and the methods that prompt it.
+
+For the same reason the caller node is created when no other pass made one, exactly as `addFilament()` already does for a resource's model. A class that talks to an LLM earns a node whether or not anything else in the project reaches it.
+
+The scan summary reports two numbers that measure this directly: **Isolated nodes** (no edge at all, almost always a pass that built nodes and forgot to wire them) and **Outside tabs** (wired, but in a cluster no tab seed reaches). They are separate because they catch different failures — the AI nodes above were correctly wired and still invisible, so only the second one would have caught them.
+
 ### It is inert when the package is absent
 
 `laravel/ai` is optional and will not be installed in most applications. Nothing in this pass imports one of its classes; detection is by fully-qualified name matched against the AST. Source files are prefiltered on the literal string `Laravel\Ai\`, so an application that does not use the SDK pays one read per source file, parses nothing, and contributes no nodes.

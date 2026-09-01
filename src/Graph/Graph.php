@@ -87,6 +87,37 @@ class Graph
         return array_values($this->edges);
     }
 
+    /**
+     * Nodes that no edge touches, counted by type.
+     *
+     * A node with no edge cannot be reached from any tab's seed, so it exists in the stored graph
+     * and appears nowhere a reader will look. That is nearly always a wiring bug in whichever pass
+     * created it rather than a fact about the application, which is why it is worth counting.
+     *
+     * @return array<string, int> node type => count, highest first
+     */
+    public function isolatedNodeCountsByType(): array
+    {
+        $touched = [];
+
+        foreach ($this->edges as $edge) {
+            $touched[$edge->source] = true;
+            $touched[$edge->target] = true;
+        }
+
+        $counts = [];
+
+        foreach ($this->nodes as $node) {
+            if (! isset($touched[$node->id])) {
+                $counts[$node->type] = ($counts[$node->type] ?? 0) + 1;
+            }
+        }
+
+        arsort($counts);
+
+        return $counts;
+    }
+
     public function toJson(): string
     {
         $meta = array_merge($this->meta, [

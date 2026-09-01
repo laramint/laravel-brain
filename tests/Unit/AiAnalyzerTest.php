@@ -215,3 +215,52 @@ it('does not treat an agent listed in another agent tools() as a caller', functi
         expect($site->callerFqcn)->not->toBe('App\\Ai\\Agents\\RouterAgent');
     }
 });
+
+it('flags a tools() body it cannot read, instead of reporting no tools', function () {
+    $result = (new AiAnalyzer)->analyze(fixture('laravel-ai-project'));
+
+    // `return $this->tools;` — the agent has tools and none of them can be named here.
+    expect(aiAgent($result, 'InjectedToolsAgent'))
+        ->toolsAreDynamic->toBeTrue()
+        ->tools->toBe([]);
+
+    // A tools() whose items are all class references is readable, even when one of them is a
+    // class the scan does not recognise — that lands in unresolvedTools, not here.
+    expect(aiAgent($result, 'SupportAgent')->toolsAreDynamic)->toBeFalse();
+    expect(aiAgent($result, 'DraftAgent')->toolsAreDynamic)->toBeFalse();
+});
+
+it('gives an agent the tools it is handed where it is constructed', function () {
+    $result = (new AiAnalyzer)->analyze(fixture('laravel-ai-project'));
+
+    // AnswerTicketJob builds it with resolve(AssistantToolProvider::class)->toolsForSupport(),
+    // and that provider instantiates exactly these two.
+    expect(aiAgent($result, 'InjectedToolsAgent')->injectedTools)->toBe([
+        'App\\Ai\\Tools\\SearchOrdersTool',
+        'App\\Ai\\Tools\\RefundTool',
+    ]);
+});
+
+it('does not hand injected tools to an agent nobody constructs that way', function () {
+    $result = (new AiAnalyzer)->analyze(fixture('laravel-ai-project'));
+
+    // SupportAgent names its own tools and is constructed with no arguments; nothing about the
+    // provider elsewhere in the project may leak onto it.
+    expect(aiAgent($result, 'SupportAgent')->injectedTools)->toBe([]);
+    expect(aiAgent($result, 'TranslationAgent')->injectedTools)->toBe([]);
+});
+
+it('records the construction argument classes on the call site', function () {
+    $result = (new AiAnalyzer)->analyze(fixture('laravel-ai-project'));
+
+    $site = null;
+    foreach ($result['callSites'] as $candidate) {
+        if ($candidate->callerFqcn === 'App\\Jobs\\AnswerTicketJob'
+            && $candidate->agentFqcn === 'App\\Ai\\Agents\\InjectedToolsAgent') {
+            $site = $candidate;
+        }
+    }
+
+    expect($site)->not->toBeNull();
+    expect($site->constructionArgClasses)->toContain('App\\Support\\AssistantToolProvider');
+});

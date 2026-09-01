@@ -2737,6 +2737,8 @@ class GraphBuilder
                     ...($agent->repairToolCalls ? ['repairToolCalls' => true] : []),
                     ...($agent->withoutBroadcasting ? ['withoutBroadcasting' => true] : []),
                     ...($agent->unresolvedTools !== [] ? ['unresolvedTools' => $agent->unresolvedTools] : []),
+                    ...($agent->injectedTools !== [] ? ['injectedTools' => $agent->injectedTools] : []),
+                    ...($agent->toolsAreDynamic ? ['toolsDecidedAtRuntime' => true] : []),
                     ...($this->aiUnwiredTools($agent) !== [] ? ['unwiredTools' => $this->aiUnwiredTools($agent)] : []),
                 ]));
             }
@@ -2751,6 +2753,12 @@ class GraphBuilder
 
             foreach ($agent->tools as $toolFqcn) {
                 $this->addEdge($agentId, $this->aiToolId($toolFqcn), 'may call', 'ai-agent-to-tool');
+            }
+
+            // Tools the agent could not name itself but was handed where it is built. Labelled
+            // apart from the declared ones, because the two are known with different certainty.
+            foreach ($agent->injectedTools as $toolFqcn) {
+                $this->addEdge($agentId, $this->aiToolId($toolFqcn), 'may call (supplied)', 'ai-agent-to-tool');
             }
 
             // An agent returned from tools() is wrapped in the SDK's AgentTool, so the model can
@@ -2785,19 +2793,34 @@ class GraphBuilder
             return [];
         }
 
-        return array_values(array_merge($agent->tools, $agent->toolAgents, $agent->unresolvedTools));
+        return array_values(array_merge(
+            $agent->tools,
+            $agent->injectedTools,
+            $agent->toolAgents,
+            $agent->unresolvedTools,
+        ));
     }
 
     /**
-     * The graph node standing for "this method of this class", whichever pass created it.
+     * The graph node standing for "this method of this class", created if no pass made one.
      *
-     * Callers arrive as a plain class + method pair, but the same pair is spelled several ways on
-     * the graph depending on which analyzer put it there. Returning null when none of them exists
-     * is the normal case for a class no entry point reaches, and leaves the agent node in place
-     * with no inbound edge rather than inventing a caller.
+     * Looking the node up and giving up when it is missing was the first version of this, and it
+     * produced no caller edges at all on a real application: measured on a 2,544-node graph with
+     * 5 agents and 17 tools, all six call sites resolved to classes — a queued job, two services,
+     * a listener helper — that the call-chain tracer never reached from any route, so not one of
+     * them had a node to attach to and all 22 AI nodes were left isolated.
+     *
+     * So the node is created when it is absent, classified exactly as the tracer would have
+     * classified it, which is what addFilament() already does for a resource's model. The class
+     * is on the graph because it talks to an LLM; that is a fact about it worth a node, whether
+     * or not anything else in the project reaches it.
      */
     private function aiCallerNodeId(string $fqcn, string $method): ?string
     {
+        if ($fqcn === '' || $method === '') {
+            return null;
+        }
+
         $candidates = [
             $this->nodeIdForHop($fqcn, $method),
             $this->filamentPageMethodId($fqcn, $method),
@@ -2811,7 +2834,11 @@ class GraphBuilder
             }
         }
 
-        return null;
+        $this->ensureNode($fqcn, $method, $this->effectiveCalleeGraphType($fqcn, $this->classifyFqcn($fqcn)), []);
+
+        $created = $this->nodeIdForHop($fqcn, $method);
+
+        return $this->graph->hasNode($created) ? $created : null;
     }
 }
 
