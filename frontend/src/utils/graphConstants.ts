@@ -43,6 +43,14 @@ export const REGION_DASH: Record<string, string> = {
   batch: '4 4',
 }
 
+/**
+ * Vertical step between two region labels that share an anchor.
+ *
+ * A node in two regions — a chained job dispatched inside a transaction — has both names
+ * written to the same corner of it. Stacking them by a line is what keeps either readable.
+ */
+export const REGION_LABEL_LINE = 11
+
 export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 

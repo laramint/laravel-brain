@@ -18,6 +18,7 @@ import {
   TRANSACTION_FRAME,
   REGION_FRAME,
   REGION_DASH,
+  REGION_LABEL_LINE,
 } from '../utils/graphConstants'
 import {
   graphRegions,
@@ -473,6 +474,62 @@ export function GraphView({
     () => regionAreas.filter((region) => regionKindVisible(region.kind)),
     [regionAreas, regionKindVisible],
   )
+
+  /**
+   * Which line each region label gets, for labels that would otherwise be written on top of
+   * each other.
+   *
+   * A node can sit in more than one region — a job dispatched in a chain from inside a
+   * transaction is in both — and every region anchors its label to the same corner of that
+   * node. Two names then render at one point and neither is readable.
+   *
+   * Overlap is decided by proximity rather than by an identical anchor. A hull label and a
+   * member label for the same node start a few pixels apart, so keying on the exact point put
+   * both on line zero and left them written over each other — which is the case that made this
+   * necessary in the first place.
+   */
+  const regionLabelSlots = useMemo(() => {
+    const slots = new Map<string, number>()
+    const placed: Array<{ x: number; y: number }> = []
+
+    const claim = (key: string, x: number, y: number) => {
+      let slot = 0
+
+      // Walk up a line at a time until the name has a strip to itself. WIDTH is a generous
+      // guess at how far a label runs — "transaction 12" at 10px mono is about 90px — because
+      // an unnecessary offset costs a few pixels while a missed one costs the text.
+      const WIDTH = 140
+      while (
+        placed.some(
+          (p) =>
+            Math.abs(p.x - x) < WIDTH &&
+            Math.abs(p.y - (y - slot * REGION_LABEL_LINE)) < REGION_LABEL_LINE - 1,
+        )
+      ) {
+        slot++
+      }
+
+      placed.push({ x, y: y - slot * REGION_LABEL_LINE })
+      slots.set(key, slot)
+    }
+
+    for (const region of visibleRegions) {
+      if (region.pure) {
+        claim(
+          region.id,
+          Math.min(...region.points.map(([x]) => x)),
+          Math.min(...region.points.map(([, y]) => y)),
+        )
+        continue
+      }
+
+      for (const m of region.members) {
+        claim(`${region.id}|${m.id}`, m.x - m.width / 2, m.y - m.height / 2)
+      }
+    }
+
+    return slots
+  }, [visibleRegions])
 
   const effectiveNodeById = useMemo(
     () => new Map(effectiveNodes.map((n) => [n.id, n])),
@@ -1247,7 +1304,11 @@ export function GraphView({
                 {region.pure ? (
                   <text
                     x={Math.min(...region.points.map(([x]) => x)) + 10}
-                    y={Math.min(...region.points.map(([, y]) => y)) - 6}
+                    y={
+                      Math.min(...region.points.map(([, y]) => y)) -
+                      6 -
+                      (regionLabelSlots.get(region.id) ?? 0) * REGION_LABEL_LINE
+                    }
                     fontSize={10} fontFamily="ui-monospace, monospace"
                     fill={stroke} opacity={0.9}
                   >
@@ -1256,7 +1317,11 @@ export function GraphView({
                 ) : (
                   region.members.map((m, i) => (
                     <text key={`${m.id}-label`}
-                      x={m.x - m.width / 2 - 4} y={m.y - m.height / 2 - 10}
+                      x={m.x - m.width / 2 - 4}
+                      y={
+                        m.y - m.height / 2 - 10 -
+                        (regionLabelSlots.get(`${region.id}|${m.id}`) ?? 0) * REGION_LABEL_LINE
+                      }
                       fontSize={9} fontFamily="ui-monospace, monospace"
                       fill={stroke} opacity={0.85}
                     >
