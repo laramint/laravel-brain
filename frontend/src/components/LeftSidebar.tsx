@@ -603,7 +603,14 @@ export function LeftSidebar({
   ]
 
   return (
-    <div className="left-sidebar-resizable" style={{ width }}>
+    <div
+      className="left-sidebar-resizable"
+      // The tree is `width: max-content` so long route paths can scroll sideways, which
+      // means anything inside it lays out against the widest row rather than against what
+      // is on screen — a wrapping row never wraps, it just sits past the fold. Publishing
+      // the real width lets a row wrap at the visible edge without giving up that scroll.
+      style={{ width, '--left-sidebar-width': `${width}px` } as React.CSSProperties}
+    >
       <div className="left-sidebar">
         <div className="left-search">
           <input

@@ -8,13 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/_laravel-brain/assets/index-C_rQHIQc.js"></script>
+    <script type="module" crossorigin src="/_laravel-brain/assets/index-Bc6G3z5W.js"></script>
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/rolldown-runtime-BHe-jwch.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-CsjAK7B8.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-react-CNktMmef.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-d3-DThTr3c3.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-utils-D7YtnGoz.js">
-    <link rel="stylesheet" crossorigin href="/_laravel-brain/assets/index-DIvGEsWk.css">
+    <link rel="stylesheet" crossorigin href="/_laravel-brain/assets/index-C1PztlR0.css">
   </head>
   <body>
     <div id="root"></div>

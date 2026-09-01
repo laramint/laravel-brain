@@ -3835,6 +3835,9 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  /* Wraps at the sidebar's visible edge rather than at the tree's scroll width. Subtracts the
+     row's own indent and kind marker so the last chip lands inside the panel, not under it. */
+  max-width: calc(var(--left-sidebar-width, 300px) - 76px);
 }
 .schedule-cadence {
   font-family: var(--mono);
