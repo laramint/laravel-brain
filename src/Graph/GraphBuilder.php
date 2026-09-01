@@ -119,7 +119,14 @@ class GraphBuilder
     /** @var string[] action-class roots, relative to the project root */
     private array $actionPaths = ActionClasses::DEFAULT_PATHS;
 
-    /** Built once per build(), when the project root is known. */
+    private bool $actionsEnabled = true;
+
+    /**
+     * Built once per build(), when the project root is known — and left null when the kind is
+     * switched off. That null IS the gate: {@see effectiveCalleeGraphType()} already had to
+     * null-check it, so a disabled scan resolves no directory, stats no file and adds no branch
+     * that was not there before.
+     */
     private ?ActionClasses $actionClasses = null;
 
     private ?ContainerBindingRegistry $bindingRegistry = null;
@@ -233,6 +240,18 @@ class GraphBuilder
     public function setActionPaths(array $paths): void
     {
         $this->actionPaths = $paths;
+    }
+
+    /**
+     * Whether classes under the action roots are recognised as their own kind at all.
+     *
+     * Distinct from an empty {@see setActionPaths()} on purpose. Both end in no action-class
+     * nodes, but "off" and "configured with no roots" are different statements, and only one of
+     * them survives someone later adding a root.
+     */
+    public function setActionsEnabled(bool $enabled): void
+    {
+        $this->actionsEnabled = $enabled;
     }
 
     /**
@@ -569,7 +588,9 @@ class GraphBuilder
             $this->psr4Map = $this->buildFullPsr4Map($projectRoot);
         }
         $this->projectRoot = $projectRoot;
-        $this->actionClasses = new ActionClasses($projectRoot, $this->actionPaths, $this->parser);
+        $this->actionClasses = $this->actionsEnabled
+            ? new ActionClasses($projectRoot, $this->actionPaths, $this->parser)
+            : null;
         $this->classMetrics = [];
         $this->edgeIdOccurrence = [];
         $this->seenControllerExtendsEdges = [];
@@ -1260,6 +1281,7 @@ class GraphBuilder
 
         // Last, so every more specific kind wins. Only a class nothing else recognised —
         // one this method was about to call a plain `service` — can become an action class.
+        // Null when the kind is disabled, which short-circuits before any filesystem work.
         if ($this->actionClasses !== null && $this->actionClasses->isActionClass($file)) {
             return 'action_class';
         }

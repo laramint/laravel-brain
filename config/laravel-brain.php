@@ -315,9 +315,18 @@ return [
     // Reclassification is conservative and one-way: only a class that nothing more
     // specific already recognised becomes an action class. A job, listener, model,
     // event, facade or Form Request sitting under one of these directories keeps the
-    // kind that recognised it. Set to an empty array to turn the kind off entirely.
+    // kind that recognised it.
+    //
+    // Turn the kind off with 'enabled' => false; nothing is then classified, and no
+    // directory is resolved or tested. An empty 'paths' array reaches the same result
+    // by a different route — no root to match, so nothing matches — but 'enabled' is
+    // the one to reach for, because it says so rather than leaving it to be inferred.
+    //
+    // Override via the LARAVEL_BRAIN_ACTIONS_ENABLED env variable.
     //
     'actions' => [
+        'enabled' => env('LARAVEL_BRAIN_ACTIONS_ENABLED', true),
+
         'paths' => [
             'app/Actions',
         ],

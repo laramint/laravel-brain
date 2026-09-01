@@ -17,8 +17,9 @@ use LaraMint\LaravelBrain\Parser\PhpFileParser;
 
 /**
  * @param  string[]|null  $actionPaths  null leaves the builder's default in place
+ * @param  bool|null  $enabled  null leaves the builder's default in place
  */
-function actionGraph(?array $actionPaths = null): Graph
+function actionGraph(?array $actionPaths = null, ?bool $enabled = null): Graph
 {
     $project = fixture('actions-project');
     $psr4 = ['App\\' => [$project.'/app']];
@@ -35,6 +36,9 @@ function actionGraph(?array $actionPaths = null): Graph
     $builder = new GraphBuilder;
     if ($actionPaths !== null) {
         $builder->setActionPaths($actionPaths);
+    }
+    if ($enabled !== null) {
+        $builder->setActionsEnabled($enabled);
     }
 
     return $builder->build(
@@ -154,6 +158,29 @@ it('turns the kind off entirely when the configured paths are empty', function (
     expect(typeCounts(actionGraph([]))['action_class'] ?? 0)->toBe(0);
 });
 
+describe('the enabled flag', function () {
+    it('recognises action classes when it is on, with the roots left alone', function () {
+        // The "on" half. A test that only ever ran the default would pass just as well if
+        // the flag were ignored, so both positions are asserted against the same roots.
+        expect(typeCounts(actionGraph(['app/Actions'], true))['action_class'] ?? 0)->toBe(4);
+    });
+
+    it('recognises none when it is off, with the roots left alone', function () {
+        expect(typeCounts(actionGraph(['app/Actions'], false))['action_class'] ?? 0)->toBe(0);
+    });
+
+    it('is on by default', function () {
+        expect(typeCounts(actionGraph())['action_class'] ?? 0)->toBe(4);
+    });
+
+    it('gives back exactly the graph a scan without the kind produces', function () {
+        // Off must not merely suppress the new nodes — the classes have to land back where
+        // they were, as plain services, with every other type untouched.
+        expect(typeCounts(actionGraph(['app/Actions'], false)))
+            ->toBe(typeCounts(actionGraph([])));
+    });
+});
+
 it('surfaces the single entry method the class is invoked through', function (string $shortName, string $entryMethod) {
     $node = actionClassNode(actionGraph(), $shortName);
 
@@ -253,6 +280,22 @@ describe('config wiring', function () {
     }
 
     it('reads the action roots from laravel-brain.actions.paths', function () {
+        $counts = scannedTypeCounts(['actions' => ['paths' => ['app/Actions']]]);
+
+        expect($counts['action_class'] ?? 0)->toBeGreaterThan(0);
+    });
+
+    it('reads the flag from laravel-brain.actions.enabled', function () {
+        $on = scannedTypeCounts(['actions' => ['enabled' => true, 'paths' => ['app/Actions']]]);
+        $off = scannedTypeCounts(['actions' => ['enabled' => false, 'paths' => ['app/Actions']]]);
+
+        expect($on['action_class'] ?? 0)->toBeGreaterThan(0)
+            ->and($off['action_class'] ?? 0)->toBe(0);
+    });
+
+    it('treats the flag as on when the published config predates it', function () {
+        // A config file published before this key existed has paths and no 'enabled'. It must
+        // keep classifying, not go quiet.
         $counts = scannedTypeCounts(['actions' => ['paths' => ['app/Actions']]]);
 
         expect($counts['action_class'] ?? 0)->toBeGreaterThan(0);

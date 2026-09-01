@@ -235,6 +235,7 @@ class ProjectAnalyzer
         $this->graphBuilder->setCacheOperationsEnabled(
             (bool) config('laravel-brain.cache_operations.enabled', true),
         );
+        $this->graphBuilder->setActionsEnabled((bool) config('laravel-brain.actions.enabled', true));
         $actionPaths = config('laravel-brain.actions.paths', ActionClasses::DEFAULT_PATHS);
         $this->graphBuilder->setActionPaths(
             is_array($actionPaths) ? $actionPaths : ActionClasses::DEFAULT_PATHS,

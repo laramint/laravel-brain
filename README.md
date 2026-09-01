@@ -45,7 +45,7 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Per-route tabs** — Each route gets its own isolated subgraph tab
 - **Middleware mapping** — Shows which middleware guards each route
 - **Model relationships** — Displays `hasMany`, `belongsTo`, and other Eloquent relations
-- **Action class recognition** — Draws single-purpose action classes (one class, one `__invoke`/`handle`/`execute`, filed under `Actions/`) as their own kind rather than as generic services, and surfaces the entry method they are invoked through
+- **Action recognition** — Draws single-purpose action classes (one class, one `__invoke`/`handle`/`execute`, filed under `Actions/`) as their own kind rather than as generic services, and surfaces the entry method they are invoked through
 - **Observer discovery** — Finds Eloquent observers (`#[ObservedBy]`, `Model::observe()`, or `booted()`) and links them to the models they observe
 - **Policy resolution** — Resolves each model's authorization policy (explicit map, `#[UsePolicy]` attribute, or naming convention) and links it in the graph
 - **View composition mapping** — Traces `@include`, `@extends`, `@component`, `@each`, and `<x-...>` components as view → view edges, so a shared partial shows every entry point it reaches
@@ -462,6 +462,7 @@ them while claiming every Filament table action. Point the config at wherever th
 
 ```php
 'actions' => [
+    'enabled' => true,
     'paths' => ['app/Actions'],
     // Modular monolith:
     // 'paths' => ['app-modules/*/src/Actions'],
@@ -470,12 +471,18 @@ them while claiming every Filament table action. Point the config at wherever th
 
 Reclassification is conservative and one-way: only a class that nothing more specific already
 recognised becomes an action class. A job, listener, model, event, facade or Form Request sitting
-under one of these directories keeps the kind that recognised it. Set `paths` to an empty array to
-turn the kind off entirely — unlike the source and view paths, an empty array here is honoured
-rather than replaced by the default.
+under one of these directories keeps the kind that recognised it.
 
-This is a distinct kind from **Action** in the table below, which is the graph's long-standing name
-for a *controller action*. The two are unrelated and neither affects the other.
+Set `enabled` to `false` to turn the kind off; nothing is classified, and no directory is resolved
+or tested. An empty `paths` array reaches the same result by a different route — no root to match,
+so nothing matches — and unlike the source and view paths an empty array here is honoured rather
+than replaced by the default. Prefer `enabled`: it says what it means instead of leaving it to be
+inferred.
+
+The node type is `action_class`, which is distinct from the long-standing `action` — the graph's
+name for a *controller action*. The two are unrelated and neither affects the other. Because
+"an Action" unqualified means this pattern in ordinary Laravel usage, the interface gives the
+unqualified label to `action_class` and calls `action` a **Controller action**.
 
 ## Graph Node Types
 
@@ -484,8 +491,8 @@ for a *controller action*. The two are unrelated and neither affects the other.
 | Route | Green `#4CAF50` | HTTP endpoint (`GET /users`) |
 | Middleware | Orange `#FF9800` | Middleware applied to a route |
 | Controller | Blue `#2196F3` | Controller class |
-| Action | Light Blue `#03A9F4` | Controller method |
-| Action class | Lime `#84cc16` | Single-purpose action class under `Actions/` |
+| Controller action | Light Blue `#03A9F4` | Controller method (node type `action`) |
+| Action | Lime `#84cc16` | Single-purpose action class under `Actions/` (node type `action_class`) |
 | Service | Purple `#9C27B0` | Service or helper class |
 | Model | Red `#F44336` | Eloquent model |
 | Event | Yellow `#FFD600` | Laravel event |
