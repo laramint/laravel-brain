@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LaraMint\LaravelBrain\Analysis;
 
 use Illuminate\Database\Eloquent\Model;
+use ReflectionClass;
 use Throwable;
 
 /**
@@ -15,11 +16,13 @@ use Throwable;
  * heuristic looks for — a relation read inside a loop — is not an N+1 at all, and flagging it
  * teaches people to ignore the marker.
  *
- * It arrived in Laravel 12.8, and this package supports 9 through 13. The call itself is the
- * version gate — on anything earlier there is no such method and the attempt throws, which is the
- * same answer as "off", because an application that cannot turn it on has not turned it on. A
- * `method_exists` guard would read better but cannot be written honestly: static analysis runs
- * against one installed version, where the method always exists.
+ * It arrived in Laravel 12.8, and this package supports 9 through 13, so the class is asked at
+ * runtime through reflection rather than called outright. Both readable spellings break half the
+ * matrix, in opposite directions: `method_exists(Model::class, '...')` is "always true" to
+ * analysis running against 12.8 or later, and calling the method outright is an undefined static
+ * method to analysis running against 11 or earlier. A local variable does not help — the name is
+ * constant-folded back into the literal. Reflection is the form that asks the same question
+ * without asserting an answer the analysed version has already decided.
  *
  * Asking the framework also beats scanning providers for the call, which would miss it being set
  * from a package, a config flag, or a conditional.
@@ -29,12 +32,16 @@ class RelationAutoloading
     public static function isEnabled(): bool
     {
         try {
-            return (bool) Model::isAutomaticallyEagerLoadingRelationships();
+            $model = new ReflectionClass(Model::class);
+
+            if (! $model->hasMethod('isAutomaticallyEagerLoadingRelationships')) {
+                return false;
+            }
+
+            return (bool) $model->getMethod('isAutomaticallyEagerLoadingRelationships')->invoke(null);
         } catch (Throwable) {
-            // Laravel below 12.8, which has no such method, or no application booted at all — a
-            // scan run outside one, or a unit test. Both mean the batching is not in effect, so
-            // both answer "off", which keeps the heuristic at its historical strength rather than
-            // silently disarming it.
+            // No application booted — a scan run outside one, or a unit test. Answering "off"
+            // keeps the heuristic at its historical strength rather than silently disarming it.
             return false;
         }
     }
