@@ -16,9 +16,17 @@ import {
   SECURITY_EXPOSURE_COLORS_LIGHT,
   SECURITY_RISK_COLORS,
   TRANSACTION_FRAME,
-  ROLLBACK_FRAME,
+  REGION_FRAME,
+  REGION_DASH,
 } from '../utils/graphConstants'
-import { transactionRegions } from '../utils/transactionRegions'
+import {
+  graphRegions,
+  regionStep,
+  REGION_KIND_LABELS,
+  REGION_KIND_ORDER,
+  REGION_KIND_PLURALS,
+  type RegionKind,
+} from '../utils/graphRegions'
 import {
   type LayoutEdge,
   type LayoutNode,
@@ -450,11 +458,21 @@ export function GraphView({
   // Computed from the DRAGGED positions, not the laid-out ones: a region is a shape over where
   // the cards actually are, and a boundary that stays behind when somebody moves a node out of it
   // is worse than no boundary — it keeps claiming a membership that is no longer on screen.
-  const transactionAreas = useMemo(() => transactionRegions(effectiveNodes), [effectiveNodes])
+  const regionAreas = useMemo(() => graphRegions(effectiveNodes), [effectiveNodes])
 
   // Toggled from the same footer as the node types: a boundary is one more thing on the canvas,
-  // and anything on the canvas should be something a reader can turn off.
-  const showTransactions = visibleTypes.has('transaction')
+  // and anything on the canvas should be something a reader can turn off. Per kind, because a
+  // reader following one chain has no reason to switch off every transaction to see it — and the
+  // rollback path is switched with the transaction it compensates, being the same span's other half.
+  const regionKindVisible = useCallback(
+    (kind: RegionKind) => visibleTypes.has(kind === 'rollback' ? 'transaction' : kind),
+    [visibleTypes],
+  )
+
+  const visibleRegions = useMemo(
+    () => regionAreas.filter((region) => regionKindVisible(region.kind)),
+    [regionAreas, regionKindVisible],
+  )
 
   const effectiveNodeById = useMemo(
     () => new Map(effectiveNodes.map((n) => [n.id, n])),
@@ -1142,6 +1160,20 @@ export function GraphView({
           >
             <path d="M0,0 L0,9 L9,4.5 z" fill="#a855f7" />
           </marker>
+          {/* One head for every ordered region, painted from the line rather than given a colour
+              of its own: a marker cannot inherit its parent's stroke, and `context-stroke` is
+              what lets one definition serve a chain frame and whatever kind is added next. */}
+          <marker
+            id="arrow-region"
+            markerWidth="8"
+            markerHeight="8"
+            refX="7"
+            refY="4"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0.5 L0,7.5 L8,4 z" fill="context-stroke" />
+          </marker>
         </defs>
         <g ref={innerRef}>
           <rect
@@ -1153,18 +1185,23 @@ export function GraphView({
             onClick={tapBg}
             style={{ pointerEvents: 'all' }}
           />
-          {/* Transaction regions, under the edges and the cards: a boundary is context, and
-              context that draws over the thing it describes stops being context.
+          {/* Regions, under the edges and the cards: a boundary is context, and context that
+              draws over the thing it describes stops being context.
 
-              Exactly one of the two marks is drawn at a time. The hull says it best when it can
-              be drawn at all — it can only be, when it encloses nothing that was not in the span
-              — and outlining the members underneath it would say the same thing twice. When the
-              hull cannot be drawn, the outlines carry membership on their own, and the name moves
-              onto them for the same reason. */}
-          {showTransactions && transactionAreas.map((region) => {
-            const stroke = region.kind === 'rollback' ? ROLLBACK_FRAME : TRANSACTION_FRAME
-            const dash = region.kind === 'rollback' ? '2 4' : '6 5'
-            const name = `${region.kind === 'rollback' ? 'rollback' : 'transaction'} ${region.index}`
+              Exactly one of the two membership marks is drawn at a time. The hull says it best
+              when it can be drawn at all — it can only be, when it encloses nothing that was not
+              in the region — and outlining the members underneath it would say the same thing
+              twice. When the hull cannot be drawn, the outlines carry membership on their own,
+              and the name moves onto them for the same reason.
+
+              An ordered region draws one more mark that the others must not: arrows through its
+              members. A chain is a sequence — B does not run if A failed — and a boundary alone
+              says only that the jobs went out together, which is the whole of what a batch says
+              and half of what a chain does. */}
+          {visibleRegions.map((region) => {
+            const stroke = REGION_FRAME[region.kind] ?? TRANSACTION_FRAME
+            const dash = REGION_DASH[region.kind] ?? '6 5'
+            const name = `${REGION_KIND_LABELS[region.kind]} ${region.index}`
 
             return (
               <g key={region.id} style={{ pointerEvents: 'none' }}>
@@ -1184,10 +1221,29 @@ export function GraphView({
                     strokeDasharray={dash} opacity={0.85} />
                 ))}
 
+                {/* Drawn between consecutive members, so a member this tab does not hold closes
+                    the gap rather than breaking the sequence: the jobs on the canvas still run in
+                    the order the arrows show. Solid, and thinner than a call edge, because it is
+                    not a call — nothing invokes the next job, the queue does. */}
+                {region.ordered && region.members.slice(1).map((m, i) => {
+                  const step = regionStep(region.members[i], m)
+                  if (!step) return null
+
+                  return (
+                    <line key={`${region.id}-${m.id}-step`}
+                      x1={step.x1} y1={step.y1} x2={step.x2} y2={step.y2}
+                      stroke={stroke} strokeWidth={1.4} opacity={0.75}
+                      markerEnd="url(#arrow-region)" />
+                  )
+                })}
+
                 {/* The name goes wherever it can be read as belonging to something. On the hull
                     once, because the shape already groups the members. Without a hull the members
                     are only outlines scattered across the canvas, and one floating label beside
-                    the topmost of them names nothing — so each carries its own. */}
+                    the topmost of them names nothing — so each carries its own. An ordered region
+                    numbers them there too: with the members far enough apart to have lost the
+                    hull, the arrows between them are long, and the step number is what still
+                    says which end of one is the beginning. */}
                 {region.pure ? (
                   <text
                     x={Math.min(...region.points.map(([x]) => x)) + 10}
@@ -1198,13 +1254,13 @@ export function GraphView({
                     {name}
                   </text>
                 ) : (
-                  region.members.map((m) => (
+                  region.members.map((m, i) => (
                     <text key={`${m.id}-label`}
                       x={m.x - m.width / 2 - 4} y={m.y - m.height / 2 - 10}
                       fontSize={9} fontFamily="ui-monospace, monospace"
                       fill={stroke} opacity={0.85}
                     >
-                      {name}
+                      {region.ordered ? `${name} · ${i + 1}` : name}
                     </text>
                   ))
                 )}
@@ -1624,17 +1680,22 @@ export function GraphView({
         ))}
 
         {/* Listed only where there is one to see, and after a separator rather than an arrow:
-            the chain above is a sequence a request passes through, and a transaction is not a
-            step in it. Joining it with an arrow would say it comes after the implementation. */}
-        {showTransactions && transactionAreas.length > 0 && (
-          <span className="g-crumb g-crumb--aside">
-            <span className="g-crumb-sep">·</span>
-            <span className="g-crumb-dot g-crumb-dot--dashed" style={{ borderColor: TRANSACTION_FRAME }} />
-            {transactionAreas.length === 1
-              ? 'transaction'
-              : `${transactionAreas.length} transactions`}
-          </span>
-        )}
+            the chain above is a sequence a request passes through, and a region is not a step in
+            it. Joining one with an arrow would say it comes after the implementation. */}
+        {REGION_KIND_ORDER.map((kind) => {
+          const count = visibleRegions.filter((region) => region.kind === kind).length
+          if (count === 0) return null
+
+          return (
+            <span key={kind} className="g-crumb g-crumb--aside">
+              <span className="g-crumb-sep">·</span>
+              <span className="g-crumb-dot g-crumb-dot--dashed" style={{ borderColor: REGION_FRAME[kind] }} />
+              {count === 1
+                ? REGION_KIND_LABELS[kind]
+                : `${count} ${REGION_KIND_PLURALS[kind]}`}
+            </span>
+          )
+        })}
       </div>
 
       <div className="g-zoom">

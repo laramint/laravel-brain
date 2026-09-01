@@ -7,6 +7,8 @@ import {
   forceSimulation,
 } from 'd3-force'
 import type { GraphElement } from '../types/graph'
+// Type-only in the other direction, so the two modules do not form a cycle at runtime.
+import { membershipsOf, ORDERED_REGION_KINDS } from './graphRegions'
 
 export interface LayoutNode {
   id: string
@@ -147,6 +149,25 @@ export function layoutDagre(nodes: LayoutNode[], edges: LayoutEdge[], rankDir: '
 }
 
 /**
+ * The one region a node is laid out with, of however many it belongs to.
+ *
+ * A job dispatched in a `Bus::chain([...])` written inside `DB::transaction(...)` is in two
+ * regions, and dagre gives a node exactly one parent — so one of them has to be chosen. The
+ * ordered one wins: a chain is read along its arrows, and arrows that cross the canvas because
+ * their nodes were placed by the enclosing transaction are the version nobody can follow. The
+ * transaction is not lost by this, it just falls back to outlining its members.
+ */
+function layoutRegionOf(node: LayoutNode): string | null {
+  const memberships = membershipsOf(node)
+
+  if (memberships.length === 0) return null
+
+  const ordered = memberships.find((m) => ORDERED_REGION_KINDS.includes(m.kind))
+
+  return (ordered ?? memberships[0]).id
+}
+
+/**
  * Groups of nodes that should be laid out together, keyed by a synthetic cluster id.
  *
  * Only groups of two or more: a single node is already contiguous with itself, and giving it a
@@ -156,9 +177,9 @@ function clusterable(nodes: LayoutNode[]): Map<string, LayoutNode[]> {
   const groups = new Map<string, LayoutNode[]>()
 
   for (const node of nodes) {
-    const id = (node.data as { transactionId?: unknown } | undefined)?.transactionId
+    const id = layoutRegionOf(node)
 
-    if (typeof id === 'string' && id !== '') {
+    if (id !== null) {
       groups.set(id, [...(groups.get(id) ?? []), node])
     }
   }
@@ -239,15 +260,15 @@ export function layoutBreadthFirst(
     layers.get(l)!.push(n.id)
   }
 
-  // Within a layer, keep work that shares a transaction next to each other. This layout places
-  // by level and would otherwise leave a span's members with unrelated nodes between them, which
-  // is enough for a boundary drawn around them to enclose something that was never in the span.
+  // Within a layer, keep work that shares a region next to each other. This layout places by
+  // level and would otherwise leave a region's members with unrelated nodes between them, which
+  // is enough for a boundary drawn around them to enclose something that was never in it.
   // Only the order inside a layer changes; no node moves between layers, so the hierarchy the
   // levelling produced is untouched.
   const spanOf = new Map<string, string>()
   for (const n of nodes) {
-    const id = (n.data as { transactionId?: unknown } | undefined)?.transactionId
-    if (typeof id === 'string' && id !== '') spanOf.set(n.id, id)
+    const id = layoutRegionOf(n)
+    if (id !== null) spanOf.set(n.id, id)
   }
 
   if (spanOf.size > 0) {
