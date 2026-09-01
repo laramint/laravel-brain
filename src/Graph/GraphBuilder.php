@@ -609,6 +609,9 @@ class GraphBuilder
             if ($edge->inRollback) {
                 $this->inRollbackNodes[$calleeNode] = true;
             }
+            if ($edge->transactionId !== null) {
+                $this->transactionIdByNode[$calleeNode] ??= $edge->transactionId;
+            }
 
             $this->maybeWireContainerBinding($edge, $models);
             $this->maybeWireFacadeResolution($edge, $models);
@@ -616,7 +619,11 @@ class GraphBuilder
 
         foreach (array_keys($this->transactionOpeners) as $key) {
             [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
-            $this->inTransactionNodes[$this->nodeIdForHop($fqcn, $method)] = true;
+            $nodeId = $this->nodeIdForHop($fqcn, $method);
+            $this->inTransactionNodes[$nodeId] = true;
+            // The opener belongs to the first span it opens, which is the one a reader sees it
+            // wrapped in when the method holds only one — the ordinary case.
+            $this->transactionIdByNode[$nodeId] ??= $key.'#0';
         }
 
         $this->stampTransactionScopes();
@@ -2230,6 +2237,17 @@ class GraphBuilder
     private array $inRollbackNodes = [];
 
     /**
+     * Which span each node sits in, as `Fqcn::method#n`.
+     *
+     * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
+     * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
+     * which draws one.
+     *
+     * @var array<string, string>
+     */
+    private array $transactionIdByNode = [];
+
+    /**
      * Write the two flags onto the nodes that earned them.
      *
      * Done in one pass after the chain is walked rather than as each edge is seen, because a
@@ -2249,7 +2267,13 @@ class GraphBuilder
                     continue;
                 }
 
-                $this->graph->updateNodeData($id, [...$node->data, $key => true]);
+                $data = [...$node->data, $key => true];
+
+                if (isset($this->transactionIdByNode[$id])) {
+                    $data['transactionId'] = $this->transactionIdByNode[$id];
+                }
+
+                $this->graph->updateNodeData($id, $data);
             }
         }
     }

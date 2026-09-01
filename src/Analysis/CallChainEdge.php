@@ -27,5 +27,7 @@ class CallChainEdge
         public bool $inTransaction = false,
         /** The call is on the compensation path — it runs only after a rollback. */
         public bool $inRollback = false,
+        /** Which span, as `Fqcn::method#n`. Nodes sharing it were inside one transaction. */
+        public ?string $transactionId = null,
     ) {}
 }

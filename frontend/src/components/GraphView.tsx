@@ -18,6 +18,7 @@ import {
   TRANSACTION_FRAME,
   ROLLBACK_FRAME,
 } from '../utils/graphConstants'
+import { transactionRegions } from '../utils/transactionRegions'
 import {
   type LayoutEdge,
   type LayoutNode,
@@ -415,6 +416,7 @@ export function GraphView({
 
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
+
   // ── Per-node drag overrides ────────────────────────────────────────────────
   const [draggedPositions, setDraggedPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const dragStateRef = useRef<{
@@ -444,6 +446,11 @@ export function GraphView({
       return pos ? { ...n, x: pos.x, y: pos.y } : n
     })
   }, [nodes, draggedPositions])
+
+  // Computed from the DRAGGED positions, not the laid-out ones: a region is a shape over where
+  // the cards actually are, and a boundary that stays behind when somebody moves a node out of it
+  // is worse than no boundary — it keeps claiming a membership that is no longer on screen.
+  const transactionAreas = useMemo(() => transactionRegions(effectiveNodes), [effectiveNodes])
 
   const effectiveNodeById = useMemo(
     () => new Map(effectiveNodes.map((n) => [n.id, n])),
@@ -1142,6 +1149,48 @@ export function GraphView({
             onClick={tapBg}
             style={{ pointerEvents: 'all' }}
           />
+          {/* Transaction regions, under the edges and the cards: a boundary is context, and
+              context that draws over the thing it describes stops being context. */}
+          {transactionAreas.map((region) => {
+            const stroke = region.kind === 'rollback' ? ROLLBACK_FRAME : TRANSACTION_FRAME
+            const dash = region.kind === 'rollback' ? '2 4' : '6 5'
+
+            // An impure region encloses a node that was never in the transaction, so the shape
+            // alone would claim something untrue. Each member is outlined instead, and the hull
+            // is dropped rather than drawn with a caveat nobody would read.
+            if (!region.pure) {
+              return (
+                <g key={region.id} style={{ pointerEvents: 'none' }}>
+                  {region.members.map((m) => (
+                    <rect key={m.id}
+                      x={m.x - m.width / 2 - 5} y={m.y - m.height / 2 - 5}
+                      width={m.width + 10} height={m.height + 10} rx={13}
+                      fill="none" stroke={stroke} strokeWidth={1.5}
+                      strokeDasharray={dash} opacity={0.8} />
+                  ))}
+                </g>
+              )
+            }
+
+            return (
+              <g key={region.id} style={{ pointerEvents: 'none' }}>
+                <polygon
+                  points={region.points.map(([x, y]) => `${x},${y}`).join(' ')}
+                  fill={stroke} fillOpacity={0.05}
+                  stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} opacity={0.8}
+                />
+                <text
+                  x={Math.min(...region.points.map(([x]) => x)) + 10}
+                  y={Math.min(...region.points.map(([, y]) => y)) - 6}
+                  fontSize={10} fontFamily="ui-monospace, monospace"
+                  fill={stroke} opacity={0.9}
+                >
+                  {region.kind === 'rollback' ? 'rollback' : 'transaction'}
+                </text>
+              </g>
+            )
+          })}
+
           {edges.map((e) => {
             if (!edgeVisible(e)) return null
             if (collapsedNodes.has(e.source) || hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target)) return null
@@ -1262,22 +1311,6 @@ export function GraphView({
                 {selected && (
                   <rect x={-hw - 3} y={-hh - 3} width={w + 6} height={h + 6}
                     rx={compact ? 7 : 13} fill="none" stroke={accent} strokeWidth={6} opacity={0.15} />
-                )}
-
-                {/* A transaction is a span, not a step, so it is drawn as a frame around the work
-                    rather than as a node in the path — nothing here changes what calls what.
-                    Dashed because the boundary is a property of the run, not a thing on screen. */}
-                {Boolean(n.data.inTransaction) && (
-                  <rect x={-hw - 5} y={-hh - 5} width={w + 10} height={h + 10}
-                    rx={compact ? 9 : 15} fill="none"
-                    stroke={TRANSACTION_FRAME} strokeWidth={1.5} strokeDasharray="5 4"
-                    opacity={0.85} style={{ pointerEvents: 'none' }} />
-                )}
-                {Boolean(n.data.inRollback) && (
-                  <rect x={-hw - 5} y={-hh - 5} width={w + 10} height={h + 10}
-                    rx={compact ? 9 : 15} fill="none"
-                    stroke={ROLLBACK_FRAME} strokeWidth={1.5} strokeDasharray="2 3"
-                    opacity={0.85} style={{ pointerEvents: 'none' }} />
                 )}
 
                 {/* Card background */}

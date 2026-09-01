@@ -41,8 +41,8 @@ final class TransactionScopes
     private const TRANSACTION_RECEIVERS = ['db', 'connection', 'schema'];
 
     /**
-     * @param  array<int, true>  $inTransaction  Keyed by `spl_object_id` of every node in a span.
-     * @param  array<int, true>  $inRollback
+     * @param  array<int, int>  $inTransaction  `spl_object_id` => span index.
+     * @param  array<int, int>  $inRollback
      */
     private function __construct(
         private readonly array $inTransaction,
@@ -77,6 +77,18 @@ final class TransactionScopes
     public function isInRollback(Node $node): bool
     {
         return isset($this->inRollback[spl_object_id($node)]);
+    }
+
+    /**
+     * Which span this node belongs to, as an index local to the method.
+     *
+     * Two nodes sharing an index sit in the same transaction and belong in the same region on
+     * screen; two methods each opening one both start at zero, so the caller qualifies these
+     * with the method they came from.
+     */
+    public function spanIndex(Node $node): ?int
+    {
+        return $this->inTransaction[spl_object_id($node)] ?? $this->inRollback[spl_object_id($node)] ?? null;
     }
 
     public function hasAny(): bool

@@ -177,6 +177,7 @@ class MethodTracer
                 visibility: $hop['visibility'],
                 inTransaction: $hop['inTransaction'] ?? false,
                 inRollback: $hop['inRollback'] ?? false,
+                transactionId: $hop['transactionId'] ?? null,
             );
 
             if (in_array($hop['type'], ['service', 'repository', 'action', 'mail', 'notification', 'abstract_class', 'resource'], true)) {
@@ -342,6 +343,7 @@ class MethodTracer
                 visibility: $hop['visibility'],
                 inTransaction: $hop['inTransaction'] ?? false,
                 inRollback: $hop['inRollback'] ?? false,
+                transactionId: $hop['transactionId'] ?? null,
             );
 
             if (in_array($hop['type'], ['service', 'repository', 'action', 'mail', 'notification', 'abstract_class', 'resource'], true)) {
@@ -386,9 +388,11 @@ class MethodTracer
             $this->transactionOpeners[$currentFqcn.'::'.$ast->name->toString()] = true;
         }
 
-        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes) extends NodeVisitorAbstract
+        $spanKey = $currentFqcn.'::'.($ast instanceof Node\Stmt\ClassMethod ? $ast->name->toString() : '__closure');
+
+        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey) extends NodeVisitorAbstract
         {
-            /** @var list<array{fqcn:string,method:string,type:string,visibility:string,inTransaction?:bool,inRollback?:bool}> */
+            /** @var list<array{fqcn:string,method:string,type:string,visibility:string,inTransaction?:bool,inRollback?:bool,transactionId?:string|null}> */
             public array $hops = [];
 
             private array $varTypeMap;
@@ -417,6 +421,7 @@ class MethodTracer
                 private MethodTracer $tracer,
                 array $dispatchFunctions,
                 private TransactionScopes $scopes,
+                private string $spanKey = '',
             ) {
                 $this->varTypeMap = $varTypeMap;
                 $this->useMap = $useMap;
@@ -472,10 +477,12 @@ class MethodTracer
                 if ($added > 0) {
                     $inTransaction = $this->scopes->isInTransaction($node);
                     $inRollback = $this->scopes->isInRollback($node);
+                    $span = $this->scopes->spanIndex($node);
 
                     for ($i = $before; $i < count($this->hops); $i++) {
                         $this->hops[$i]['inTransaction'] = $inTransaction;
                         $this->hops[$i]['inRollback'] = $inRollback;
+                        $this->hops[$i]['transactionId'] = $span === null ? null : $this->spanKey.'#'.$span;
                     }
                 }
 

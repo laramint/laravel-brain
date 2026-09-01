@@ -24,18 +24,28 @@ use PhpParser\NodeVisitorAbstract;
  */
 final class TransactionScopeCollector extends NodeVisitorAbstract
 {
-    /** @var array<int, true> */
+    /**
+     * Node id => the index of the span it belongs to.
+     *
+     * An index rather than a flag, because a method may open several transactions and the reader
+     * needs to know which nodes share one. Two spans in one method are two regions on screen,
+     * and a boolean cannot say that.
+     *
+     * @var array<int, int>
+     */
     public array $inTransaction = [];
 
-    /** @var array<int, true> */
+    /** @var array<int, int> */
     public array $inRollback = [];
+
+    private int $nextSpan = 0;
 
     public function enterNode(Node $node): ?int
     {
         $body = TransactionScopes::opensClosureTransaction($node);
 
         if ($body !== null) {
-            $this->inTransaction += $this->subtreeIds($body);
+            $this->assign($this->subtreeIds($body), $this->inTransaction);
         }
 
         // A catch block that rolls back is the compensation path: everything it does happens with
@@ -44,8 +54,10 @@ final class TransactionScopeCollector extends NodeVisitorAbstract
         if ($node instanceof Node\Stmt\TryCatch) {
             foreach ($node->catches as $catch) {
                 if (TransactionScopes::statementCalls($catch, ['rollBack', 'rollback'])) {
+                    $rollbackSpan = $this->nextSpan++;
+
                     foreach ($catch->stmts as $statement) {
-                        $this->inRollback += $this->subtreeIds($statement);
+                        $this->assign($this->subtreeIds($statement), $this->inRollback, $rollbackSpan);
                     }
                 }
             }
@@ -72,19 +84,19 @@ final class TransactionScopeCollector extends NodeVisitorAbstract
                 continue;
             }
 
-            $open = false;
+            $open = null;
 
             foreach ($value as $statement) {
                 if (! $statement instanceof Node) {
                     continue;
                 }
 
-                if ($open) {
-                    $this->inTransaction += $this->subtreeIds($statement);
+                if ($open !== null) {
+                    $this->assign($this->subtreeIds($statement), $this->inTransaction, $open);
 
                     // The statement that ends the span is part of it — `commit()` runs inside.
                     if (TransactionScopes::statementCalls($statement, ['commit', 'rollBack', 'rollback'])) {
-                        $open = false;
+                        $open = null;
                     }
 
                     continue;
@@ -94,14 +106,30 @@ final class TransactionScopeCollector extends NodeVisitorAbstract
                     continue;
                 }
 
-                $this->inTransaction += $this->subtreeIds($statement);
+                $span = $this->nextSpan++;
+                $this->assign($this->subtreeIds($statement), $this->inTransaction, $span);
 
                 // Only an *unbalanced* opener runs the span on into its siblings. A statement
                 // holding both ends — `if ($flag) { begin; …; commit; }` — has already closed
                 // inside itself, and treating it as an opener would swallow the whole rest of
                 // the method. The nested list is marked on its own pass anyway.
-                $open = ! TransactionScopes::statementCalls($statement, ['commit', 'rollBack', 'rollback']);
+                $open = TransactionScopes::statementCalls($statement, ['commit', 'rollBack', 'rollback']) ? null : $span;
             }
+        }
+    }
+
+    /**
+     * File the given node ids under one span, minting a new index when none was given.
+     *
+     * @param  array<int, true>  $ids
+     * @param  array<int, int>  $into
+     */
+    private function assign(array $ids, array &$into, ?int $span = null): void
+    {
+        $span ??= $this->nextSpan++;
+
+        foreach (array_keys($ids) as $id) {
+            $into[$id] ??= $span;
         }
     }
 
