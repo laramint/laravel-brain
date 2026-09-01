@@ -2599,7 +2599,11 @@ class GraphBuilder
                     : $entry->target;
 
                 $this->graph->addNode(new Node($schedId, 'schedule', $label, [
-                    'type' => $entry->type,
+                    // NOT `type`. The viewer reads a node's kind out of its data, so a `type` key
+                    // here overwrites the node's own kind and a scheduled task draws as whatever
+                    // it runs — a schedule for a command rendered as a second, identical-looking
+                    // command node sitting above the real one.
+                    'targetType' => $entry->type,
                     'target' => $entry->target,
                     'frequency' => $entry->frequency,
                     'frequencyArguments' => $entry->frequencyArguments,
