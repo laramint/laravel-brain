@@ -148,7 +148,10 @@ class ProjectAnalyzer
             $sourcePaths,
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
-        $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
+        $this->modelAnalyzer = new ModelAnalyzer(
+            is_array($modelPaths) ? $modelPaths : [],
+            MorphMap::fromApplication(),
+        );
         $filamentPanelPaths = config('laravel-brain.filament.panel_paths', FilamentAnalyzer::DEFAULT_PANEL_PATHS);
         $filamentPaths = config('laravel-brain.filament.paths', FilamentAnalyzer::DEFAULT_PATHS);
         $this->filamentAnalyzer = new FilamentAnalyzer(

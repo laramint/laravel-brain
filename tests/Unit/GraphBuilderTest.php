@@ -6,6 +6,7 @@ use LaraMint\LaravelBrain\Analysis\ControllerAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelAnalyzer;
+use LaraMint\LaravelBrain\Analysis\MorphMap;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Graph\Edge;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
@@ -233,3 +234,21 @@ it('creates the listener as a node of its own type', function () {
 
     expect($types)->toContain('listener')->toContain('event');
 });
+
+it('names the morph alias on a model node in a route graph too', function () {
+    // A route graph's model node carries no ERD payload, so without this the alias would exist
+    // only on the ERD tab — and a route graph is where people click a model.
+    $build = function (?MorphMap $morphMap) {
+        $routes = (new RouteAnalyzer)->analyze(fixture('laravel-project'));
+        $controllers = (new ControllerAnalyzer)->analyze(fixture('laravel-project'), $routes);
+        $traces = (new MethodTracer)->trace($controllers);
+        $models = (new ModelAnalyzer([], $morphMap))->analyze(fixture('laravel-project'), ['App\\Models\\Order']);
+
+        return (new GraphBuilder)->build('test', $routes, new MiddlewareRegistry([], [], []), $controllers, $traces, $models);
+    };
+
+    $node = fn ($graph) => $graph->getNode('model::App\\Models\\Order');
+
+    expect($node($build(new MorphMap(['order' => 'App\\Models\\Order'])))->data['morphAlias'])->toBe('order')
+        // No map, no key — a null would render as an empty row on every model in most projects.
+        ->and($node($build(null))->data)->not->toHaveKey('morphAlias');});

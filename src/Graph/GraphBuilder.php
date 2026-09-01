@@ -2006,6 +2006,14 @@ class GraphBuilder
             }
         }
 
+        // A route graph's model node has no ERD payload, so the alias would only be visible on
+        // the ERD tab — and the alias is exactly what someone arrives with when they came from a
+        // `*_type` value in a query. Set only when there is one: an absent key is dropped by the
+        // sidebar's property list, whereas a null renders as an empty row on every model in a
+        // project that has no morph map at all.
+        if ($def?->morphAlias !== null) {
+            $data['morphAlias'] = $def->morphAlias;
+        }
         $this->graph->addNode(new Node($id, 'model', $short, $data));
     }
 

@@ -455,6 +455,8 @@ class GraphSplitter
                         'appends' => $def->appends,
                         'accessors' => $def->accessors,
                         'relationships' => $def->relationships,
+                        'morphAlias' => $def->morphAlias,
+                        'morphAliasMissing' => $def->morphAliasMissing,
                     ],
                 ],
             ));

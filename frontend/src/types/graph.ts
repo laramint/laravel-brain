@@ -93,6 +93,10 @@ export interface ErdModelData {
   appends: string[]
   accessors: string[]
   relationships: { type: string; related: string }[]
+  /** The value this model writes to `*_type` columns, when `Relation::morphMap()` names it. */
+  morphAlias?: string | null
+  /** The app enforces a morph map and this model is not in it — `getMorphClass()` will throw. */
+  morphAliasMissing?: boolean
 }
 
 /** One node or edge in the format produced from `GraphData` (Cytoscape-compatible shape). */
