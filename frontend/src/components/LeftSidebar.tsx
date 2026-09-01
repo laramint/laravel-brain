@@ -178,12 +178,20 @@ function ScheduleItem({ tab, schedule, isActive, isLoading, onSelect }: {
           {SCHEDULE_KINDS[schedule.type] ?? '›'}
         </span>
         <span className="schedule-row-body">
-          <span className="route-row-uri">{shortTarget(schedule.target)}</span>
-          <span className="schedule-row-meta">
-            <span className={`schedule-cadence ${schedule.cadence ? '' : 'schedule-cadence--unknown'}`}>{cadence}</span>
-            {schedule.timezone && <span className="schedule-chip">{schedule.timezone}</span>}
-            {guards.map((g) => <span key={g} className="schedule-chip">{g}</span>)}
+          {/* Three fixed lines, each scrolling on its own. A command name and a row of guards are
+              both open-ended, and the panel is not: wrapping them would give one task three lines
+              and the next one five, and letting the panel scroll instead hides the start of every
+              other row to show the end of one. */}
+          <span className="schedule-row-scroll">
+            <span className="route-row-uri">{shortTarget(schedule.target)}</span>
           </span>
+          <span className={`schedule-cadence ${schedule.cadence ? '' : 'schedule-cadence--unknown'}`}>{cadence}</span>
+          {(schedule.timezone || guards.length > 0) && (
+            <span className="schedule-row-scroll schedule-row-badges">
+              {schedule.timezone && <span className="schedule-chip">{schedule.timezone}</span>}
+              {guards.map((g) => <span key={g} className="schedule-chip">{g}</span>)}
+            </span>
+          )}
         </span>
         {isLoading && <span className="route-row-loading">…</span>}
       </button>

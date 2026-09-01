@@ -3754,7 +3754,10 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
 }
 .mode-tab-count--alert { background: var(--danger); color: #fff; }
 .left-content { flex: 1; overflow: auto; padding: 0 8px; }
-.route-tree { width: max-content; min-width: 100%; }
+/* The panel no longer grows to its widest row. It used to be `width: max-content`, so one long
+   route path made every row wider than the panel and the whole tree scrolled sideways — reading
+   the end of one row hid the start of all the others. Each name now scrolls inside itself. */
+.route-tree { width: 100%; min-width: 0; }
 .left-empty { color: var(--faint); font-size: 12px; padding: 18px 12px; text-align: center; }
 
 .tree-group-header {
@@ -3806,6 +3809,14 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   text-align: left;
   font-size: 12px;
   white-space: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.route-row-uri::-webkit-scrollbar {
+  display: none;
 }
 .route-row-risk {
   font-family: var(--mono);
@@ -3829,20 +3840,40 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   flex: 1;
   min-width: 0;
 }
-.schedule-row-body .route-row-uri { white-space: normal; overflow-wrap: anywhere; }
-.schedule-row-meta {
+.schedule-row-body .route-row-uri { white-space: nowrap; overflow-wrap: normal; }
+/* Each open-ended line scrolls inside itself. The tree is `width: max-content` so long route
+   paths can scroll sideways, which means a row lays out against the widest row in the panel
+   rather than against what is on screen — without a width of its own, a task's name and guards
+   simply sit past the fold. The width is the sidebar's real one, published by the component
+   because the panel is draggable, less the row's indent and kind marker. */
+.schedule-row-scroll {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  /* Wraps at the sidebar's visible edge rather than at the tree's scroll width. Subtracts the
-     row's own indent and kind marker so the last chip lands inside the panel, not under it. */
   max-width: calc(var(--left-sidebar-width, 300px) - 76px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.schedule-row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.schedule-row-scroll > * {
+  flex: 0 0 auto;
+}
+
+.schedule-row-badges {
+  margin-top: 2px;
 }
 .schedule-cadence {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--accent);
+  /* The row is a <button>, which centres its text. While the cadence sat inside a flex line it
+     was laid out flex-start; on a line of its own it inherited the centring. */
+  text-align: left;
 }
 .schedule-cadence--unknown { color: var(--faint); font-style: italic; }
 .schedule-chip {
