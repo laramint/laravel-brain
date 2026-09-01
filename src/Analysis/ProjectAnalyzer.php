@@ -221,7 +221,9 @@ class ProjectAnalyzer
         $this->schemaTimeout = is_numeric($schemaTimeout) && (int) $schemaTimeout > 0
             ? (int) $schemaTimeout
             : null;
-
+        $this->graphBuilder->setDetectOutgoingHttp(
+            (bool) config('laravel-brain.outgoing_http.enabled', true),
+        );
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
         $this->graphBuilder->setCacheOperationsEnabled(

@@ -110,6 +110,20 @@ than guessing.
 Declared timeouts and retries are shown, and so is their absence — a request with no timeout waits
 as long as the third party takes, which is worth seeing before an incident rather than during one.
 
+Detection is on by default and switches off in one place, which skips the scan rather than
+discarding its result:
+
+```php
+// config/laravel-brain.php
+'outgoing_http' => [
+    'enabled' => false,
+],
+```
+
+```dotenv
+LARAVEL_BRAIN_OUTGOING_HTTP_ENABLED=false
+```
+
 ## Blade views
 
 Templates are scanned to link a view to the views it `@include`s or renders as a component, and a view name is resolved back to its file the same way. Both read the same list, so an application that keeps templates in packages points them there once:

@@ -153,6 +153,17 @@ class GraphBuilder
     }
 
     /**
+     * Whether nodes report the outgoing HTTP requests their method makes.
+     *
+     * Forwarded to the flow extractor rather than filtered out of the node data here, so that a
+     * project which turns this off does not pay for the scan first.
+     */
+    public function setDetectOutgoingHttp(bool $enabled): void
+    {
+        $this->flowExtractor->detectOutgoingHttp($enabled);
+    }
+
+    /**
      * The view roots a view name is resolved against. Must match what
      * {@see BladeViewAnalyzer} was given, or the two
      * disagree about which templates exist.

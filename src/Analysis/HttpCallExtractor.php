@@ -132,6 +132,15 @@ class HttpCallExtractor
 
     private const GUZZLE_CLIENT = 'GuzzleHttp\\Client';
 
+    /**
+     * Expressions scanned for outgoing calls in this process.
+     *
+     * @internal Counter for tests and benchmarks; never read by production code. It exists so a
+     * test can tell "the feature is off" from "the feature ran and found nothing" — the two look
+     * identical from the outside, and only one of them is what the config switch promises.
+     */
+    public static int $scanCount = 0;
+
     /** @var array<string, string> alias => FQCN, for ASTs the NameResolver never saw */
     private array $useMap = [];
 
@@ -173,6 +182,8 @@ class HttpCallExtractor
      */
     public function fromExpression(Node\Expr $expr, bool $descendIntoClosures = false): array
     {
+        self::$scanCount++;
+
         $visitor = new HttpCallVisitor($this, $descendIntoClosures);
         $traverser = new NodeTraverser;
         $traverser->addVisitor($visitor);

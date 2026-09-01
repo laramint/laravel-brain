@@ -1,9 +1,13 @@
 <?php
 
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
 use LaraMint\LaravelBrain\Analysis\ControllerAnalyzer;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
+use LaraMint\LaravelBrain\Analysis\HttpCallExtractor;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
+use LaraMint\LaravelBrain\Analysis\ProjectAnalyzer;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
 use LaraMint\LaravelBrain\Parser\PhpFileParser;
@@ -16,7 +20,7 @@ use PhpParser\NodeVisitorAbstract;
  * GraphBuilder flattens them — the calls hang off statements, so a test that only looked at the
  * top level would be blind to the ones inside a loop or an `if`.
  */
-function httpCallsInMethodBody(string $body, string $imports = ''): array
+function httpCallsInMethodBody(string $body, string $imports = '', ?FlowExtractor $extractor = null): array
 {
     $parsed = (new PhpFileParser)->parseCode(<<<PHP
         <?php
@@ -51,7 +55,7 @@ function httpCallsInMethodBody(string $body, string $imports = ''): array
     });
     $traverser->traverse($parsed['ast'] ?? []);
 
-    $steps = $found === null ? [] : (new FlowExtractor)->extract($found, $parsed['useMap'] ?? []);
+    $steps = $found === null ? [] : ($extractor ?? new FlowExtractor)->extract($found, $parsed['useMap'] ?? []);
 
     $flatten = function (array $steps) use (&$flatten): array {
         $calls = [];
@@ -400,6 +404,164 @@ describe('where the calls are found', function () {
 
         expect(array_filter($first, fn ($s) => isset($s['http'])))->not->toBeEmpty()
             ->and(array_filter($second, fn ($s) => isset($s['http'])))->toBeEmpty();
+    });
+});
+
+describe('the config switch', function () {
+    $body = "        \\Illuminate\\Support\\Facades\\Http::get('https://api.example.test/orders');";
+
+    it('detects outgoing calls by default', function () use ($body) {
+        expect(httpCallsInMethodBody($body))->toHaveCount(1);
+    });
+
+    it('reports nothing when detection is switched off', function () use ($body) {
+        $extractor = new FlowExtractor;
+        $extractor->detectOutgoingHttp(false);
+
+        expect(httpCallsInMethodBody($body, '', $extractor))->toBe([]);
+    });
+
+    it('does not scan at all when detection is switched off', function () use ($body) {
+        // The promise of the switch is that the work is skipped, not that its result is dropped.
+        // Nothing else can tell those apart from outside: both produce a node with no calls on it.
+        $off = new FlowExtractor;
+        $off->detectOutgoingHttp(false);
+
+        $before = HttpCallExtractor::$scanCount;
+        httpCallsInMethodBody($body, '', $off);
+        $afterOff = HttpCallExtractor::$scanCount;
+        httpCallsInMethodBody($body);
+        $afterOn = HttpCallExtractor::$scanCount;
+
+        expect($afterOff)->toBe($before)
+            ->and($afterOn)->toBeGreaterThan($before);
+    });
+
+    it('still charts the flow when detection is switched off', function () {
+        // The switch removes one annotation, not the chart it hangs on.
+        $extractor = new FlowExtractor;
+        $extractor->detectOutgoingHttp(false);
+        $parsed = (new PhpFileParser)->parseCode(<<<'PHP'
+            <?php
+
+            namespace App;
+
+            use Illuminate\Support\Facades\Http;
+
+            class Subject
+            {
+                public function handle()
+                {
+                    return Http::get('https://api.example.test/orders');
+                }
+            }
+            PHP);
+
+        $method = null;
+        $traverser = new NodeTraverser;
+        $traverser->addVisitor(new class($method) extends NodeVisitorAbstract
+        {
+            public function __construct(private mixed &$method) {}
+
+            public function enterNode(Node $node): ?int
+            {
+                if ($node instanceof Node\Stmt\ClassMethod && $this->method === null) {
+                    $this->method = $node;
+                }
+
+                return null;
+            }
+        });
+        $traverser->traverse($parsed['ast'] ?? []);
+
+        $steps = $extractor->extract($method, $parsed['useMap']);
+
+        expect($steps)->toHaveCount(1)
+            ->and($steps[0]['label'])->toContain('Http::get')
+            ->and($steps[0])->not->toHaveKey('http');
+    });
+
+    it('leaves the key off every node when the graph builder is told to skip detection', function () {
+        $routes = (new RouteAnalyzer)->analyze(fixture('outgoing-http-project'));
+        $controllers = (new ControllerAnalyzer)->analyze(fixture('outgoing-http-project'), $routes);
+        $traces = (new MethodTracer)->trace($controllers);
+
+        $builder = new GraphBuilder;
+        $builder->setDetectOutgoingHttp(false);
+        $graph = $builder->build(
+            'test',
+            $routes,
+            new MiddlewareRegistry([], [], []),
+            $controllers,
+            $traces,
+            [],
+            fixture('outgoing-http-project'),
+        );
+
+        expect(array_filter($graph->nodes(), fn ($n) => isset($n->data['httpCalls'])))->toBe([]);
+
+        // …and the same project with the switch left alone does report them, so this is the flag
+        // talking and not a fixture that stopped making calls.
+        $on = (new GraphBuilder)->build(
+            'test',
+            $routes,
+            new MiddlewareRegistry([], [], []),
+            $controllers,
+            $traces,
+            [],
+            fixture('outgoing-http-project'),
+        );
+
+        expect(array_filter($on->nodes(), fn ($n) => isset($n->data['httpCalls'])))->not->toBe([]);
+    });
+});
+
+describe('the published config entry', function () {
+    /**
+     * Nodes reporting outgoing calls after a real analysis of the fixture project, with the
+     * `laravel-brain.outgoing_http.enabled` entry set — or left unset, which is the case every
+     * application that never publishes the config file is in.
+     */
+    $nodesWithCalls = function (?bool $enabled): array {
+        $config = ['app' => ['name' => 'OutgoingHttpSwitch']];
+        if ($enabled !== null) {
+            $config['laravel-brain'] = ['outgoing_http' => ['enabled' => $enabled]];
+        }
+
+        $container = new Container;
+        Container::setInstance($container);
+        $container->instance('config', new Repository($config));
+
+        try {
+            $graph = (new ProjectAnalyzer)->analyze(fixture('outgoing-http-project'), function () {})->fullGraph;
+        } finally {
+            Container::setInstance(null);
+        }
+
+        return array_filter($graph->nodes(), fn ($n) => isset($n->data['httpCalls']));
+    };
+
+    it('detects outgoing calls when the entry is absent', function () use ($nodesWithCalls) {
+        // An application that never published the config file gets the feature, which is what
+        // "defaults to on" has to mean to be worth anything.
+        expect($nodesWithCalls(null))->not->toBe([]);
+    });
+
+    it('detects outgoing calls when the entry is true', function () use ($nodesWithCalls) {
+        expect($nodesWithCalls(true))->not->toBe([]);
+    });
+
+    it('reports none when the entry is false', function () use ($nodesWithCalls) {
+        expect($nodesWithCalls(false))->toBe([]);
+    });
+
+    it('ships the key the analyzer reads, defaulting to on', function () {
+        // The published file and the code that reads it are two halves of one name. Renaming
+        // either alone leaves a config entry that looks configured and switches nothing — with no
+        // error anywhere, because a missing key just falls back to its default.
+        $published = require dirname(__DIR__, 2).'/config/laravel-brain.php';
+
+        expect($published['outgoing_http']['enabled'] ?? null)->toBeTrue();
     });
 });
 

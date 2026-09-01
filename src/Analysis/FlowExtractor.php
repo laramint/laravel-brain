@@ -53,8 +53,9 @@ class FlowExtractor
      */
     private HttpCallExtractor $httpCalls;
 
-    public function __construct(private readonly bool $relationsAutoloaded = false)
-    {
+    private bool $detectOutgoingHttp = true;
+
+    public function __construct(private readonly bool $relationsAutoloaded = false)    {
         $this->printer = new PrettyPrinter;
         $this->cacheDetector = new CacheOperationDetector;
         $this->useMap = [];
@@ -72,6 +73,18 @@ class FlowExtractor
     public function setCacheOperationsEnabled(bool $enabled): void
     {
         $this->cacheDetector = $enabled ? ($this->cacheDetector ?? new CacheOperationDetector) : null;
+    }
+
+    /**
+     * Whether to read each statement for calls that leave the application.
+     *
+     * Off is off: the scan does not run, rather than running and having its result dropped. This
+     * walker sees every method in the project, so the difference is a whole pass over the source
+     * for a project that asked not to have one — see `laravel-brain.outgoing_http.enabled`.
+     */
+    public function detectOutgoingHttp(bool $enabled): void
+    {
+        $this->detectOutgoingHttp = $enabled;
     }
 
     /**
@@ -258,6 +271,10 @@ class FlowExtractor
      */
     private function withHttpCalls(array $step, Node\Stmt $stmt): array
     {
+        if (! $this->detectOutgoingHttp) {
+            return $step;
+        }
+
         $charted = $stmt instanceof Node\Stmt\Expression && isset($step['body']);
 
         $calls = [];
