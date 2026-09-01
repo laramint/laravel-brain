@@ -72,6 +72,10 @@ class ProjectAnalyzer
     /** @var string[] */
     private array $facadePaths = FacadeAnalyzer::DEFAULT_PATHS;
 
+    private bool $tableStatsEnabled = true;
+
+    private ?string $tableStatsConnection = null;
+
     /** @var callable(string, array): void */
     private $onProgress;
 
@@ -160,6 +164,12 @@ class ProjectAnalyzer
 
         $facadePaths = config('laravel-brain.facades.paths', FacadeAnalyzer::DEFAULT_PATHS);
         $this->facadePaths = is_array($facadePaths) ? $facadePaths : FacadeAnalyzer::DEFAULT_PATHS;
+
+        $this->tableStatsEnabled = (bool) config('laravel-brain.table_stats.enabled', true);
+        $statsConnection = config('laravel-brain.table_stats.connection');
+        $this->tableStatsConnection = is_string($statsConnection) && $statsConnection !== ''
+            ? $statsConnection
+            : null;
 
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
@@ -373,6 +383,22 @@ class ProjectAnalyzer
         $models = $this->modelAnalyzer->analyze($projectRoot, $modelFqcns);
         $this->emit('step:done', ['step' => 'models', 'count' => count($models), 'unit' => 'model', 'message' => '    Found '.count($models).' model(s)']);
 
+        // How much data each of those models actually sits on. The only step that reads the
+        // database rather than the source, and the only one whose failure is uninteresting:
+        // no connection means no numbers, not a failed scan.
+        $this->emit('step:start', ['step' => 'table_stats', 'label' => 'Reading table sizes', 'message' => '  → Reading table sizes...']);
+        $tableStats = [];
+        if ($this->tableStatsEnabled) {
+            // Ask each model which table it reads before matching anything to it. Parsing can only
+            // see a `$table` written in the model's own file, and a prefix applied by a base class
+            // is invisible to it — which on a real codebase means almost every model misses.
+            $models = (new ModelTableResolver)->resolve($models);
+            $tableStats = TableStatsCollector::forConnection($this->tableStatsConnection)?->collect() ?? [];
+        }
+        $this->graphBuilder->setTableStats($tableStats);
+        $statsCount = count($tableStats);
+        $this->emit('step:done', ['step' => 'table_stats', 'count' => $statsCount, 'unit' => 'table', 'message' => '    Measured '.$statsCount.' table(s)']);
+
         $this->emit('step:start', ['step' => 'observers', 'label' => 'Scanning model observers', 'message' => '  → Scanning model observers...']);
         $observerMap = $this->observerAnalyzer->analyze($projectRoot);
         $observerCount = array_sum(array_map('count', $observerMap));
@@ -528,7 +554,7 @@ class ProjectAnalyzer
         $erdModels = $models;
         ksort($erdModels);
 
-        $erd = $this->graphSplitter->buildErdTab($erdModels, $projectName, $analyzedAt);
+        $erd = $this->graphSplitter->buildErdTab($erdModels, $projectName, $analyzedAt, $tableStats);
         if ($erd !== null) {
             $split['subgraphs'][$erd['id']] = $erd['graph'];
             $split['manifest'][] = $erd['manifest'];

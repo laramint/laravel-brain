@@ -28,6 +28,7 @@ use LaraMint\LaravelBrain\Analysis\ProjectFileIndex;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SourceDirectories;
+use LaraMint\LaravelBrain\Analysis\TableStats;
 use LaraMint\LaravelBrain\Analysis\ValidationRulesExtractor;
 use LaraMint\LaravelBrain\Parser\PhpExtendsFqcnResolver;
 use LaraMint\LaravelBrain\Parser\PhpFileParser;
@@ -1950,11 +1951,47 @@ class GraphBuilder
             return;
         }
         $short = class_basename($fqcn);
-        $this->graph->addNode(new Node($id, 'model', $short, [
+        $data = [
             'fqcn' => $fqcn,
             'file' => $def !== null ? $def->file : $this->resolveFile($fqcn),
             'relationships' => $def !== null ? $def->relationships : [],
-        ]));
+        ];
+
+        $stats = $def !== null ? $this->statsFor($def->table) : null;
+        if ($stats !== null) {
+            $data['tableStats'] = $stats;
+        }
+
+        $this->graph->addNode(new Node($id, 'model', $short, $data));
+    }
+
+    /**
+     * What the live database reported for each table, keyed by table name. Empty whenever the
+     * scan could not read a database, which is the ordinary case for a CI run.
+     *
+     * @var array<string, TableStats>
+     */
+    private array $tableStats = [];
+
+    /** @param array<string, TableStats> $stats */
+    public function setTableStats(array $stats): void
+    {
+        $this->tableStats = $stats;
+    }
+
+    /**
+     * The measured row for a model's table, or null when the table was not measured — a model
+     * whose table lives on another connection, a view, or a scan that read no database at all.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function statsFor(string $table): ?array
+    {
+        if ($table === '' || ! isset($this->tableStats[$table])) {
+            return null;
+        }
+
+        return $this->tableStats[$table]->toArray();
     }
 
     private function addEventNode(string $fqcn, string $id): void

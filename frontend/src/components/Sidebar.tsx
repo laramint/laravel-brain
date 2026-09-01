@@ -56,6 +56,33 @@ const TYPE_COLORS: Record<string, string> = {
 
 type TabId = 'info' | 'risks' | 'flow' | 'source' | 'edges' | 'usages' | 'stress'
 
+/** Bytes as the unit a person would say out loud: 28.8 MB, not 30220288. */
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return '—'
+  if (bytes < 1024) return `${bytes} B`
+
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
+/**
+ * A row count, marked as approximate when it is. Most engines report the planner's estimate
+ * rather than a counted figure, and the difference matters enough to show — an exact count would
+ * have meant a sequential scan of every table in the application.
+ */
+function formatRows(rows: number | null, estimated: boolean): string {
+  if (rows === null) return '—'
+
+  return `${estimated ? '~' : ''}${rows.toLocaleString('en-US')}`
+}
+
 export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const isDragging = useRef(false)
@@ -245,10 +272,12 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'validationRules' &&
       key !== 'security' &&
       key !== 'erd' &&
+      key !== 'tableStats' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
   const erd = node.data?.erd as import('../types/graph').ErdModelData | undefined
+  const tableStats = node.data?.tableStats as import('../types/graph').TableStatsData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -584,6 +613,16 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {tableStats && (
+                <div className="sidebar-section">
+                  <h3>Table Data</h3>
+                  <div className="prop-row"><span className="prop-key">rows</span><span className="prop-value">{formatRows(tableStats.rows, tableStats.rowsEstimated)}</span></div>
+                  <div className="prop-row"><span className="prop-key">table</span><span className="prop-value">{formatBytes(tableStats.tableBytes)}</span></div>
+                  <div className="prop-row"><span className="prop-key">indexes</span><span className="prop-value">{formatBytes(tableStats.indexBytes)}</span></div>
+                  <div className="prop-row"><span className="prop-key">total</span><span className="prop-value">{formatBytes(tableStats.totalBytes)}</span></div>
                 </div>
               )}
 
