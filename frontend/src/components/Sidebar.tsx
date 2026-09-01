@@ -300,6 +300,12 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const fatMethod = !!node.data?.fatMethod
   const fatClass = !!node.data?.fatClass
   const hasN1 = !!node.data?.hasN1
+  // A deferred provider whose provides() cannot trigger it never boots at all — no error,
+  // no log line, just a provider that silently does nothing. Badge it like a smell.
+  const deferredDefect = typeof node.data?.deferredDefect === 'string' ? node.data.deferredDefect : null
+  const deferredDefectMessage = typeof node.data?.deferredDefectMessage === 'string'
+    ? node.data.deferredDefectMessage
+    : ''
 
   const dbQueries = (node.data?.dbQueries ?? []) as DbQuery[]
   const cacheOps = (node.data?.cacheOps ?? []) as CacheOperation[]
@@ -335,6 +341,8 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'event' &&
       key !== 'listener' &&
       key !== 'job' &&
+      key !== 'deferredDefect' &&
+      key !== 'deferredDefectMessage' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -454,12 +462,23 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
         </div>
 
         {/* Smell badges */}
-        {(fatMethod || fatClass || hasN1) && (
+        {(fatMethod || fatClass || hasN1 || deferredDefect) && (
           <div className="sidebar-smells">
             {hasN1 && (
               <Tooltip content="N+1 Query: database query inside a loop">
                 <span className="smell-badge smell-badge--n1">
                   ⚠️ N+1 Query
+                </span>
+              </Tooltip>
+            )}
+            {deferredDefect && (
+              <Tooltip content={deferredDefectMessage}>
+                <span className="smell-badge smell-badge--deferred">
+                  {deferredDefect === 'never-boots'
+                    ? '⏳ Never boots'
+                    : deferredDefect === 'unbacked-provides'
+                      ? '⏳ Unbacked provides()'
+                      : '⏳ $defer ignored'}
                 </span>
               </Tooltip>
             )}
