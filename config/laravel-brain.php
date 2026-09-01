@@ -386,6 +386,26 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // laravel/ai Search Paths
+    // -------------------------------------------------------------------------
+    // Directories scanned for `laravel/ai` agents and the tools they expose to the
+    // model. Leave this unset and the Source Paths below are used, which is right
+    // for almost every project — agents are ordinary application classes and are
+    // not required to live in a directory of their own.
+    //
+    // The scan is inert in an application that does not use the SDK: files are
+    // prefiltered on the literal string `Laravel\Ai\`, so a project without it
+    // pays one read per source file and no parse at all, and contributes no nodes.
+    //
+    // Glob patterns are expanded, as above:
+    //
+    //   'paths' => ['app-modules/*/src'],
+    //
+    // 'ai' => [
+    //     'paths' => ['app/Ai'],
+    // ],
+
+    // -------------------------------------------------------------------------
     // Container Binding Search Paths
     // -------------------------------------------------------------------------
     // Directories holding service providers, scanned recursively for container

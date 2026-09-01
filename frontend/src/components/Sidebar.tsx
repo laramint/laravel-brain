@@ -46,6 +46,8 @@ const TYPE_COLORS: Record<string, string> = {
   abstract_class: '#94a3b8',
   service_provider: '#ca8a04',
   facade:     '#00BCD4',
+  ai_agent:   '#A3E635',
+  ai_tool:    '#65A30D',
   filament_panel:            '#7C3AED',
   filament_resource:         '#A855F7',
   filament_page:             '#C084FC',
@@ -82,6 +84,46 @@ function formatRows(rows: number | null, estimated: boolean): string {
 
   return `${estimated ? '~' : ''}${rows.toLocaleString('en-US')}`
 }
+
+const AI_ACCENT = '#A3E635'
+
+/**
+ * What the agent's model line should say — which is not always a model id.
+ *
+ * `#[UseSmartestModel]` picks a tier, not a name: the SDK turns it into
+ * `$provider->smartestTextModel()`, whose answer depends on the provider chosen at runtime and
+ * on `config('ai.<lab>.models.text.smartest')`. Printing a guess there would be worse than
+ * printing nothing, so the tier is named as a tier. A `model()` method is the same story unless
+ * its body is a literal.
+ */
+function aiModelSummary(data: Record<string, unknown>): string {
+  const model = typeof data.model === 'string' ? data.model : null
+  if (model) return model
+
+  const source = typeof data.modelSource === 'string' ? data.modelSource : ''
+  const tier = typeof data.modelTier === 'string' ? data.modelTier : ''
+
+  if (source === 'tier') return `${tier} tier — provider decides`
+  if (source === 'method') return 'decided at runtime by model()'
+
+  return "provider's default model"
+}
+
+/** Knob rows worth a line each, in the order a reader asks about them. */
+const AI_KNOBS: { key: string; label: string }[] = [
+  { key: 'provider', label: 'provider' },
+  { key: 'maxSteps', label: 'max steps' },
+  { key: 'maxTokens', label: 'max tokens' },
+  { key: 'temperature', label: 'temperature' },
+  { key: 'topP', label: 'top p' },
+  { key: 'timeout', label: 'timeout' },
+]
+
+const AI_MODES: { key: string; label: string }[] = [
+  { key: 'strict', label: 'strict' },
+  { key: 'repairToolCalls', label: 'repairs tool calls' },
+  { key: 'withoutBroadcasting', label: 'no broadcasting' },
+]
 
 export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
@@ -536,6 +578,99 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       {String(node.data.route)}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {node.type === 'ai_agent' && (
+                <div className="sidebar-section">
+                  <h3>Model &amp; limits</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">model</span>
+                    <span className="prop-value" style={{ fontFamily: 'monospace', color: AI_ACCENT }}>
+                      {aiModelSummary(node.data)}
+                    </span>
+                  </div>
+                  {AI_KNOBS.map(({ key, label }) =>
+                    node.data?.[key] === undefined ? null : (
+                      <div key={key} className="prop-row">
+                        <span className="prop-key">{label}</span>
+                        <span className="prop-value" style={{ fontFamily: 'monospace' }}>
+                          {String(node.data[key])}
+                        </span>
+                      </div>
+                    ),
+                  )}
+                  {AI_MODES.map(({ key, label }) =>
+                    node.data?.[key] ? (
+                      <div key={key} className="prop-row">
+                        <span className="prop-key">{label}</span>
+                        <span className="prop-value">yes</span>
+                      </div>
+                    ) : null,
+                  )}
+                  {Array.isArray(node.data?.methodOverrides) && node.data.methodOverrides.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">overridable</span>
+                      <span className="prop-value">{(node.data.methodOverrides as string[]).join(', ')}</span>
+                    </div>
+                  )}
+                  {typeof node.data?.shadowedModelAttribute === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>dead #[Model]</span>
+                      <span className="prop-value">
+                        {node.data.shadowedModelAttribute} — a model() method is read instead
+                      </span>
+                    </div>
+                  )}
+                  {typeof node.data?.shadowedProviderAttribute === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>dead #[Provider]</span>
+                      <span className="prop-value">
+                        {node.data.shadowedProviderAttribute} — a provider() method is read instead
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.contracts) && node.data.contracts.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">contracts</span>
+                      <span className="prop-value">{(node.data.contracts as string[]).join(', ')}</span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.unwiredTools) && node.data.unwiredTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>unwired tools</span>
+                      <span className="prop-value">
+                        {(node.data.unwiredTools as string[]).map((t) => t.split('\\').pop()).join(', ')}
+                        {' — tools() is never called without the HasTools contract'}
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.unresolvedTools) && node.data.unresolvedTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">unresolved tools</span>
+                      <span className="prop-value">
+                        {(node.data.unresolvedTools as string[]).join(', ')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {node.type === 'ai_tool' && (
+                <div className="sidebar-section">
+                  <h3>Tool</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">kind</span>
+                    <span className="prop-value">
+                      {node.data?.toolKind === 'mcp' ? 'MCP server tool' : 'laravel/ai tool'}
+                    </span>
+                  </div>
+                  {typeof node.data?.description === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key">description</span>
+                      <span className="prop-value">{node.data.description}</span>
+                    </div>
+                  )}
                 </div>
               )}
 

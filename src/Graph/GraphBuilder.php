@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace LaraMint\LaravelBrain\Graph;
 
 use Illuminate\Support\Str;
+use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
+use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
+use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
@@ -2668,6 +2671,147 @@ class GraphBuilder
                 $this->addEdge($resourceId, $this->filamentRelationManagerId($rmFqcn), 'has relation', 'filament-resource-to-relation');
             }
         }
+    }
+
+    // ── laravel/ai agents and tools ───────────────────────────────────────────
+
+    private function aiAgentId(string $fqcn): string
+    {
+        return "ai_agent::{$fqcn}";
+    }
+
+    private function aiToolId(string $fqcn): string
+    {
+        return "ai_tool::{$fqcn}";
+    }
+
+    /**
+     * Put the application's LLM calls on the graph: one node per agent, one per tool, an edge
+     * from each agent to every tool it hands the model, and an edge from each method that names
+     * an agent to that agent.
+     *
+     * Must run after the Filament pass. A caller node is looked up rather than created — an
+     * agent prompted from a Filament page method lives under a filament_page_method id, which
+     * only exists once that pass has run, and looking for it first is the difference between
+     * that edge appearing and being dropped by {@see addEdge}'s missing-node guard.
+     *
+     * @param  AiAgentDefinition[]  $agents
+     * @param  AiToolDefinition[]  $tools
+     * @param  AiAgentCallSite[]  $callSites
+     */
+    public function addAi(array $agents, array $tools, array $callSites): void
+    {
+        foreach ($tools as $tool) {
+            $id = $this->aiToolId($tool->fqcn);
+            if (! $this->graph->hasNode($id)) {
+                $this->graph->addNode(new Node($id, 'ai_tool', class_basename($tool->fqcn), [
+                    'fqcn' => $tool->fqcn,
+                    'file' => $tool->file,
+                    'toolKind' => $tool->kind,
+                    ...($tool->description !== '' ? ['description' => $tool->description] : []),
+                ]));
+            }
+        }
+
+        foreach ($agents as $agent) {
+            $id = $this->aiAgentId($agent->fqcn);
+            if (! $this->graph->hasNode($id)) {
+                $this->graph->addNode(new Node($id, 'ai_agent', class_basename($agent->fqcn), [
+                    'fqcn' => $agent->fqcn,
+                    'file' => $agent->file,
+                    'contracts' => $agent->contracts,
+                    'modelSource' => $agent->modelSource,
+                    'providerSource' => $agent->providerSource,
+                    'methodOverrides' => $agent->methodOverrides,
+                    ...($agent->model !== null ? ['model' => $agent->model] : []),
+                    ...($agent->modelTier !== null ? ['modelTier' => $agent->modelTier] : []),
+                    ...($agent->shadowedModelAttribute !== null ? ['shadowedModelAttribute' => $agent->shadowedModelAttribute] : []),
+                    ...($agent->provider !== null ? ['provider' => $agent->provider] : []),
+                    ...($agent->shadowedProviderAttribute !== null ? ['shadowedProviderAttribute' => $agent->shadowedProviderAttribute] : []),
+                    ...($agent->maxSteps !== null ? ['maxSteps' => $agent->maxSteps] : []),
+                    ...($agent->maxTokens !== null ? ['maxTokens' => $agent->maxTokens] : []),
+                    ...($agent->temperature !== null ? ['temperature' => $agent->temperature] : []),
+                    ...($agent->topP !== null ? ['topP' => $agent->topP] : []),
+                    ...($agent->timeout !== null ? ['timeout' => $agent->timeout] : []),
+                    ...($agent->strict ? ['strict' => true] : []),
+                    ...($agent->repairToolCalls ? ['repairToolCalls' => true] : []),
+                    ...($agent->withoutBroadcasting ? ['withoutBroadcasting' => true] : []),
+                    ...($agent->unresolvedTools !== [] ? ['unresolvedTools' => $agent->unresolvedTools] : []),
+                    ...($this->aiUnwiredTools($agent) !== [] ? ['unwiredTools' => $this->aiUnwiredTools($agent)] : []),
+                ]));
+            }
+        }
+
+        foreach ($agents as $agent) {
+            if (! $agent->declaresHasTools) {
+                continue;
+            }
+
+            $agentId = $this->aiAgentId($agent->fqcn);
+
+            foreach ($agent->tools as $toolFqcn) {
+                $this->addEdge($agentId, $this->aiToolId($toolFqcn), 'may call', 'ai-agent-to-tool');
+            }
+
+            // An agent returned from tools() is wrapped in the SDK's AgentTool, so the model can
+            // call it exactly as it calls a tool — a delegation, drawn agent to agent.
+            foreach ($agent->toolAgents as $delegateFqcn) {
+                $this->addEdge($agentId, $this->aiAgentId($delegateFqcn), 'delegates to', 'ai-agent-to-agent');
+            }
+        }
+
+        foreach ($callSites as $site) {
+            $callerId = $this->aiCallerNodeId($site->callerFqcn, $site->callerMethod);
+            if ($callerId === null) {
+                continue;
+            }
+            $this->addEdge($callerId, $this->aiAgentId($site->agentFqcn), 'prompts', 'ai-caller-to-agent');
+        }
+    }
+
+    /**
+     * Tools an agent returns from tools() that the model will never be offered.
+     *
+     * `GeneratesText::resolveTools()` opens with `if (! $agent instanceof HasTools) return [];`,
+     * so a tools() method on a class that forgot the contract is dead code — verified against
+     * v0.11.0. Drawing "may call" edges for those would put a capability on the graph that the
+     * model does not have, so they are listed on the node instead of wired.
+     *
+     * @return list<string>
+     */
+    private function aiUnwiredTools(AiAgentDefinition $agent): array
+    {
+        if ($agent->declaresHasTools) {
+            return [];
+        }
+
+        return array_values(array_merge($agent->tools, $agent->toolAgents, $agent->unresolvedTools));
+    }
+
+    /**
+     * The graph node standing for "this method of this class", whichever pass created it.
+     *
+     * Callers arrive as a plain class + method pair, but the same pair is spelled several ways on
+     * the graph depending on which analyzer put it there. Returning null when none of them exists
+     * is the normal case for a class no entry point reaches, and leaves the agent node in place
+     * with no inbound edge rather than inventing a caller.
+     */
+    private function aiCallerNodeId(string $fqcn, string $method): ?string
+    {
+        $candidates = [
+            $this->nodeIdForHop($fqcn, $method),
+            $this->filamentPageMethodId($fqcn, $method),
+            $this->actionId($fqcn, $method),
+            $this->controllerId($fqcn),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if ($this->graph->hasNode($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 }
 

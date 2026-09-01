@@ -144,6 +144,43 @@ Applications that keep their Filament classes somewhere other than `app/Filament
 
 A file named `*PanelProvider.php` is treated as a panel by convention. Any other file counts as a panel only when it actually builds a `Panel::make()` chain, so pointing `panel_paths` at a whole source tree does not turn every class into a panel.
 
+## laravel/ai agents and tools
+
+Where an application uses [`laravel/ai`](https://github.com/laravel/ai), every LLM call goes through an agent class. Brain puts those agents on the graph as nodes of their own, together with the tools they expose to the model and the configuration that decides what a call costs and what it is allowed to do.
+
+An agent is recognised when it implements `Laravel\Ai\Contracts\Agent` or uses the `Laravel\Ai\Promptable` trait, and so is any class that extends one — a project's own `BaseAgent` and its children all appear. A tool is recognised when it implements `Laravel\Ai\Contracts\Tool` or `CanActAsTool`, **or** when it extends `Laravel\Mcp\Server\Tool`: the SDK accepts an MCP server tool straight from `tools()` and wraps it itself, and in a real application those are often the majority.
+
+Three kinds of edge come out of it:
+
+- **caller → agent** — the controller action, job or command method that names the agent, so "which code paths talk to an LLM" is a question the graph answers.
+- **agent → tool** — every tool the agent returns from `tools()`.
+- **agent → agent** — an agent returned from another agent's `tools()`, which the SDK wraps in an `AgentTool`; a delegation rather than a call.
+
+### The model is reported as honestly as it can be known
+
+`#[Model('gpt-4o-mini')]` names a model, and the node shows it. The other spellings do not, and the node says so rather than guessing:
+
+- **`#[UseSmartestModel]` / `#[UseCheapestModel]` pick a tier, not a name.** The SDK turns them into `$provider->smartestTextModel()`, whose answer depends on the provider chosen at runtime and on `config('ai.<lab>.models.text.smartest')`. The node reports the tier.
+- **A `model()` method shadows `#[Model]` completely.** `Promptable::getProvidersAndModels()` is an if/else, not a coalesce: if the class declares (or inherits) a `model()` method, the attribute is never read at all — a method returning `null` leaves the agent with no model, not with the attribute's value. When the method body is a literal Brain reports it; otherwise the node says the model is decided at runtime, and lists the now-dead attribute separately so the discrepancy is visible.
+- The same rule applies to `provider()` versus `#[Provider]`.
+
+Attributes are **not** inherited — PHP does not hand class attributes to subclasses, and the SDK reads them with plain `getAttributes()` — so a base agent's `#[Model]` really is inert for its children, and Brain does not report it on them. Interfaces, knob methods and `tools()` are inherited, and those Brain does fold in.
+
+Alongside the model, the agent node carries provider, max steps, max tokens, temperature, top P, timeout, strict mode, and the contracts the class implements (`HasTools`, `HasStructuredOutput`, `Conversational`, `RemembersConversations`, `Approvable`, …). Two mismatches get their own line: a `tools()` method on a class that never implements `HasTools` (the SDK's `resolveTools()` returns early, so the model is never offered them, and Brain does not draw the edges), and a tool reference `tools()` builds at runtime that no static reading can resolve.
+
+### It is inert when the package is absent
+
+`laravel/ai` is optional and will not be installed in most applications. Nothing in this pass imports one of its classes; detection is by fully-qualified name matched against the AST. Source files are prefiltered on the literal string `Laravel\Ai\`, so an application that does not use the SDK pays one read per source file, parses nothing, and contributes no nodes.
+
+Agents are ordinary application classes, so the scan follows `source_paths` by default. Point it somewhere narrower if you want to:
+
+```php
+// config/laravel-brain.php
+'ai' => [
+    'paths' => ['app-modules/*/src'],
+],
+```
+
 ## Graph Node Types
 
 | Node | Accent Color | Represents |
@@ -156,6 +193,8 @@ A file named `*PanelProvider.php` is treated as a panel by convention. Any other
 | Model | <span class="color-dot" style="background:#F44336"></span> Red `#F44336` | Eloquent model |
 | Event | <span class="color-dot" style="background:#FFD600"></span> Yellow `#FFD600` | Laravel event |
 | Job | <span class="color-dot" style="background:#607D8B"></span> Slate `#607D8B` | Queued job |
+| AI Agent | <span class="color-dot" style="background:#A3E635"></span> Lime `#A3E635` | `laravel/ai` agent class |
+| AI Tool | <span class="color-dot" style="background:#65A30D"></span> Dark Lime `#65A30D` | Tool an agent exposes to the model |
 | Filament Panel | <span class="color-dot" style="background:#7C3AED"></span> Violet `#7C3AED` | Filament panel definition |
 | Filament Resource | <span class="color-dot" style="background:#A855F7"></span> Purple `#A855F7` | Filament resource class |
 | Filament Page | <span class="color-dot" style="background:#C084FC"></span> Lavender `#C084FC` | Filament page class |

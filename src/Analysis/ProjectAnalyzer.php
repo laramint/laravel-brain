@@ -61,6 +61,8 @@ class ProjectAnalyzer
 
     private FilamentAnalyzer $filamentAnalyzer;
 
+    private AiAnalyzer $aiAnalyzer;
+
     private QueryTracer $queryTracer;
 
     private SecurityAnalyzer $securityAnalyzer;
@@ -155,6 +157,13 @@ class ProjectAnalyzer
             is_array($filamentPanelPaths) ? $filamentPanelPaths : FilamentAnalyzer::DEFAULT_PANEL_PATHS,
             is_array($filamentPaths) ? $filamentPaths : FilamentAnalyzer::DEFAULT_PATHS,
         );
+        // Agents live wherever the application's classes live, so the source paths are the right
+        // default; the dedicated key exists for a project that keeps them somewhere narrower.
+        $aiPaths = config('laravel-brain.ai.paths', $sourcePaths);
+        $this->aiAnalyzer = new AiAnalyzer(
+            is_array($aiPaths) && $aiPaths !== [] ? $aiPaths : $sourcePaths,
+        );
+
         $this->queryTracer = new QueryTracer($sourcePaths);
         $this->securityAnalyzer = new SecurityAnalyzer(
             extraAuthPatterns: $this->stringList(config('laravel-brain.security.auth_middleware', [])),
@@ -517,6 +526,11 @@ class ProjectAnalyzer
             $this->emit('step:done', ['step' => 'filament_chains', 'count' => count($filamentPageEdges), 'unit' => 'call edge', 'message' => '    Discovered '.count($filamentPageEdges).' Filament page call chain edge(s)']);
         }
 
+        $this->emit('step:start', ['step' => 'ai', 'label' => 'Scanning AI agents', 'message' => '  → Scanning AI agents...']);
+        $aiResult = $this->aiAnalyzer->analyze($projectRoot);
+        $agentCount = count($aiResult['agents']);
+        $this->emit('step:done', ['step' => 'ai', 'count' => $agentCount, 'unit' => 'agent', 'extra' => count($aiResult['tools']).' tools', 'message' => '    Found '.$agentCount.' AI agent(s), '.count($aiResult['tools']).' tool(s)']);
+
         $this->emit('step:start', ['step' => 'queries', 'label' => 'Tracing DB queries', 'message' => '  → Tracing DB queries...']);
         $dbQueryMap = $this->queryTracer->buildQueryMap($callChain, $controllers, $psr4Map, $projectRoot);
         $this->emit('step:done', ['step' => 'queries', 'count' => count($dbQueryMap), 'unit' => 'action', 'message' => '    Found DB query info for '.count($dbQueryMap).' action(s)']);
@@ -569,6 +583,12 @@ class ProjectAnalyzer
                 }
                 $this->graphBuilder->addFilamentPageCallChain($filamentPageEdges, $pageNodeIds);
             }
+        }
+
+        // After Filament on purpose: an agent prompted from a Filament page method can only be
+        // wired to that method once its node exists. See GraphBuilder::addAi().
+        if ($aiResult['detected']) {
+            $this->graphBuilder->addAi($aiResult['agents'], $aiResult['tools'], $aiResult['callSites']);
         }
 
         // Descend into view composition last, so every view node reached by a

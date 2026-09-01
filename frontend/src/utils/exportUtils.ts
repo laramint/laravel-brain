@@ -7,6 +7,7 @@ import { splitNodeLabel } from './graphLayoutD3'
 const TYPE_ORDER = [
   'route', 'middleware', 'controller', 'action', 'service', 'validation_request', 'repository', 'model', 'job', 'event',
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
+  'ai_agent', 'ai_tool',
   'filament_panel', 'filament_resource', 'filament_page', 'filament_page_method',
   'filament_widget', 'filament_relation_manager',
 ]
