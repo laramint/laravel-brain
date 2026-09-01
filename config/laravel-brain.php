@@ -625,6 +625,33 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Reachability
+    // -------------------------------------------------------------------------
+    // The "Reachability" tab: an inventory of every entry point the application can be
+    // entered from (routes, console commands, scheduled entries, broadcast channels, queued
+    // listeners, Filament panels/resources/pages), and the classes under `source_paths` that
+    // no entry point's traced call chain arrives at.
+    //
+    // Every other tab is grown forward from one entry point, so a gap in the graph is
+    // invisible from inside it. This is the inverse view — what exists, and what nothing
+    // reaches.
+    //
+    // Read what it reports carefully: "nothing reaches this from a traced entry point" is a
+    // statement about the tracer, not about whether the code runs. A class resolved out of
+    // the container, fronted by a facade, named as a string in config, or built by reflection
+    // is alive and still lands on the list, which is why every reference Brain *did* find is
+    // shown next to the class. It is not a dead-code report and must not be read as one.
+    //
+    // Cost: one extra parse pass over `source_paths` and over `config/`, on top of the pass a
+    // scan already makes. Turn it off if you do not want it.
+    //
+    // Override via the LARAVEL_BRAIN_REACHABILITY_ENABLED env variable.
+    //
+    'reachability' => [
+        'enabled' => env('LARAVEL_BRAIN_REACHABILITY_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // Watch Paths
     // -------------------------------------------------------------------------
     // Directories polled by `brain:scan --watch` and hashed into the build fingerprint

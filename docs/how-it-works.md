@@ -315,6 +315,42 @@ Agents are ordinary application classes, so the scan follows `source_paths` by d
 
 `enabled` is a second, independent switch: it answers "this application uses the SDK and I still do not want it on the graph", which the string prefilter above cannot. Turning it off skips the pass before the directory scan, so nothing is read and nothing is parsed.
 
+
+## Reachability
+
+Every other tab is grown forward from one entry point, which means a gap in the graph is invisible from inside it. Measured on one application, the graph knew 45 of its 211 event classes and 27 of its 113 job classes, and no screen said so.
+
+The **Reachability** tab is the inverse view. It has three sections:
+
+1. **Entry points**, grouped by kind — routes, console commands, scheduled entries, broadcast channels, queued listeners, Filament panels/resources/pages. Nothing in the application is reachable except through one of these, so their inventory is the denominator for everything below.
+2. **Nothing reaches these from an entry point**, grouped by kind, largest group first — so "17 jobs nothing dispatches" is answerable at a glance.
+3. **Outside what the tracer follows** — service providers and exceptions, kinds Brain has no call edge for at all. The framework boots a provider and an exception is thrown rather than called, so their absence from the graph is the expected outcome and says nothing either way. They are kept apart so they do not bury the section above.
+
+::: warning This is not a dead-code report
+"Nothing reaches this from a traced entry point" is a statement about the tracer, not about whether the code runs. A class resolved out of the container, fronted by a facade, named as a string in config, or built by reflection is alive and will still land on the list.
+
+Every reference Brain *did* find is shown next to the class, so you can tell the two apart:
+
+| Shown as | Means |
+|----------|-------|
+| bound in the container | named as the abstract or the concrete of a `bind()` / `singleton()` in a provider |
+| reached through a facade | is a facade, or the class one resolves to |
+| named in config/ | appears as `Foo::class` or a quoted FQCN under `config/` |
+| inherited by a class that is reached | a class the tracer did reach extends it, implements it, or uses it as a trait |
+| named as a class-string elsewhere | appears as `Foo::class` or a quoted FQCN in another source file |
+
+A class with none of these is the one worth opening first — and still worth opening rather than deleting.
+:::
+
+The tab reads the classes declared under [`source_paths`](#source-paths-and-watch-mode) and costs one extra parse pass over them plus `config/`. Turn it off with:
+
+```php
+// config/laravel-brain.php
+'reachability' => [
+    'enabled' => false, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=false
+],
+```
+
 ## Graph Node Types
 
 | Node | Accent Color | Represents |
@@ -335,6 +371,8 @@ Agents are ordinary application classes, so the scan follows `source_paths` by d
 | Filament Page Method | <span class="color-dot" style="background:#E879F9"></span> Pink `#E879F9` | Method on a Filament page |
 | Filament Widget | <span class="color-dot" style="background:#06B6D4"></span> Cyan `#06B6D4` | Filament widget class |
 | Filament Relation Manager | <span class="color-dot" style="background:#0891B2"></span> Teal `#0891B2` | Filament relation manager |
+| Entry Point | <span class="color-dot" style="background:#22D3EE"></span> Cyan `#22D3EE` | A root on the Reachability tab |
+| Not Reached | <span class="color-dot" style="background:#94A3B8"></span> Grey `#94A3B8` | A class no entry point's chain arrives at. Grey on purpose — it is a question, not a verdict |
 
 ::: tip Note
 Command, Schedule, Channel, and Repository nodes are discovered and added to the graph but use the closest matching accent color from their parent type.
