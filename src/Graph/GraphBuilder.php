@@ -603,14 +603,8 @@ class GraphBuilder
             // A transaction is a span, not a step, so it is recorded as something true OF the
             // work rather than as a node in the path. The callee is what runs inside; the caller
             // is what opened it and generally outlives it.
-            if ($edge->inTransaction) {
-                $this->inTransactionNodes[$calleeNode] = true;
-            }
-            if ($edge->inRollback) {
-                $this->inRollbackNodes[$calleeNode] = true;
-            }
-            if ($edge->transactionId !== null) {
-                $this->transactionIdByNode[$calleeNode] ??= $edge->transactionId;
+            if ($edge->inTransaction || $edge->inRollback) {
+                $this->recordSpanState($calleeNode, $edge->transactionId, $edge->inTransaction, $edge->inRollback);
             }
 
             $this->maybeWireContainerBinding($edge, $models);
@@ -620,10 +614,9 @@ class GraphBuilder
         foreach (array_keys($this->transactionOpeners) as $key) {
             [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
             $nodeId = $this->nodeIdForHop($fqcn, $method);
-            $this->inTransactionNodes[$nodeId] = true;
             // The opener belongs to the first span it opens, which is the one a reader sees it
             // wrapped in when the method holds only one — the ordinary case.
-            $this->transactionIdByNode[$nodeId] ??= $key.'#0';
+            $this->recordSpanState($nodeId, $key.'#0', inTransaction: true, inRollback: false);
         }
 
         $this->stampTransactionScopes();
@@ -2227,25 +2220,37 @@ class GraphBuilder
     }
 
     /**
-     * Node ids that run inside a transaction, and those on a rollback path.
-     *
-     * @var array<string, true>
-     */
-    private array $inTransactionNodes = [];
-
-    /** @var array<string, true> */
-    private array $inRollbackNodes = [];
-
-    /**
-     * Which span each node sits in, as `Fqcn::method#n`.
+     * Which span each node sits in, and what is true of the node WITHIN that span.
      *
      * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
      * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
      * which draws one.
      *
-     * @var array<string, string>
+     * The three facts are kept together on purpose. A node can be reached from more than one
+     * span — a service called both inside a transaction and from a catch block that rolls one
+     * back — and recording them apart let the id come from the first span while the rollback
+     * flag came from any span at all. The node then drew inside region A wearing region B's
+     * marking: shown as a rollback member of a transaction it never rolled back.
+     *
+     * @var array<string, array{id: string|null, inTransaction: bool, inRollback: bool}>
      */
-    private array $transactionIdByNode = [];
+    private array $spanStateByNode = [];
+
+    /**
+     * Bind a node to the first span that reached it, flags and identity together.
+     *
+     * First one wins, which is what the identity did before this and is the honest choice while
+     * a node carries one region: a later span cannot be shown, so silently replacing the earlier
+     * one would only change which of two answers is hidden.
+     */
+    private function recordSpanState(string $nodeId, ?string $spanId, bool $inTransaction, bool $inRollback): void
+    {
+        $this->spanStateByNode[$nodeId] ??= [
+            'id' => $spanId,
+            'inTransaction' => $inTransaction,
+            'inRollback' => $inRollback,
+        ];
+    }
 
     /**
      * Write the two flags onto the nodes that earned them.
@@ -2257,24 +2262,28 @@ class GraphBuilder
      */
     private function stampTransactionScopes(): void
     {
-        foreach ([$this->inTransactionNodes, $this->inRollbackNodes] as $index => $ids) {
-            $key = $index === 0 ? 'inTransaction' : 'inRollback';
+        foreach ($this->spanStateByNode as $id => $state) {
+            $node = $this->graph->getNode($id);
 
-            foreach (array_keys($ids) as $id) {
-                $node = $this->graph->getNode($id);
-
-                if ($node === null) {
-                    continue;
-                }
-
-                $data = [...$node->data, $key => true];
-
-                if (isset($this->transactionIdByNode[$id])) {
-                    $data['transactionId'] = $this->transactionIdByNode[$id];
-                }
-
-                $this->graph->updateNodeData($id, $data);
+            if ($node === null) {
+                continue;
             }
+
+            $data = $node->data;
+
+            if ($state['inTransaction']) {
+                $data['inTransaction'] = true;
+            }
+
+            if ($state['inRollback']) {
+                $data['inRollback'] = true;
+            }
+
+            if ($state['id'] !== null) {
+                $data['transactionId'] = $state['id'];
+            }
+
+            $this->graph->updateNodeData($id, $data);
         }
     }
 
