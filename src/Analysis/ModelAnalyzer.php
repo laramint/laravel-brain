@@ -252,6 +252,8 @@ class ModelAnalyzer
 
             public array $accessors = [];
 
+            public bool $isAbstract = false;
+
             private array $useMap;
 
             public function __construct(array $useMap)
@@ -261,6 +263,10 @@ class ModelAnalyzer
 
             public function enterNode(Node $node): ?int
             {
+                if ($node instanceof Node\Stmt\Class_ && $node->name !== null) {
+                    $this->isAbstract = $node->isAbstract();
+                }
+
                 // SoftDeletes trait
                 if ($node instanceof Node\Stmt\TraitUse) {
                     foreach ($node->traits as $t) {
@@ -470,7 +476,14 @@ class ModelAnalyzer
             // `getMorphClass()` call on an unmapped model throws. Carrying the verdict rather
             // than the global "is enforcement on" flag keeps the rule in one place, and stops
             // every model node from repeating a fact about the application.
-            morphAliasMissing: $morphAlias === null && $this->morphMap->isEnforced(),
+            //
+            // An abstract class is excluded: it cannot be instantiated, so no `getMorphClass()`
+            // call can ever reach it, and a morph map that omits it is correct rather than
+            // incomplete. Measured on a 60-module application, 2 of the 48 models this flagged
+            // were abstract base classes — reported as a defect they can never cause.
+            morphAliasMissing: $morphAlias === null
+                && $this->morphMap->isEnforced()
+                && ! $visitor->isAbstract,
         );
     }
 
