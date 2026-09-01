@@ -76,6 +76,10 @@ class ProjectAnalyzer
 
     private ?string $tableStatsConnection = null;
 
+    private bool $schemaEnabled = true;
+
+    private ?string $schemaConnection = null;
+
     /** @var callable(string, array): void */
     private $onProgress;
 
@@ -169,6 +173,12 @@ class ProjectAnalyzer
         $statsConnection = config('laravel-brain.table_stats.connection');
         $this->tableStatsConnection = is_string($statsConnection) && $statsConnection !== ''
             ? $statsConnection
+            : null;
+
+        $this->schemaEnabled = (bool) config('laravel-brain.schema.enabled', true);
+        $schemaConnection = config('laravel-brain.schema.connection');
+        $this->schemaConnection = is_string($schemaConnection) && $schemaConnection !== ''
+            ? $schemaConnection
             : null;
 
         $this->graphBuilder->setSourcePaths($sourcePaths);
@@ -383,21 +393,50 @@ class ProjectAnalyzer
         $models = $this->modelAnalyzer->analyze($projectRoot, $modelFqcns);
         $this->emit('step:done', ['step' => 'models', 'count' => count($models), 'unit' => 'model', 'message' => '    Found '.count($models).' model(s)']);
 
-        // How much data each of those models actually sits on. The only step that reads the
-        // database rather than the source, and the only one whose failure is uninteresting:
-        // no connection means no numbers, not a failed scan.
+        // Two reads of the live database, and the only steps that open a connection at all.
+        // Both fail quietly for the same reason: no connection means missing numbers, not a
+        // failed scan.
+        //
+        // The table resolver runs once for both. Parsing sees a `$table` written in the model's
+        // own file and nothing else — not a connection prefix, not one inherited from a base
+        // class, not a `getTable()` override — so both steps need it and neither should pay for
+        // it twice.
+        if ($this->tableStatsEnabled || $this->schemaEnabled) {
+            $models = (new ModelTableResolver)->resolve($models);
+        }
+
         $this->emit('step:start', ['step' => 'table_stats', 'label' => 'Reading table sizes', 'message' => '  → Reading table sizes...']);
         $tableStats = [];
         if ($this->tableStatsEnabled) {
-            // Ask each model which table it reads before matching anything to it. Parsing can only
-            // see a `$table` written in the model's own file, and a prefix applied by a base class
-            // is invisible to it — which on a real codebase means almost every model misses.
-            $models = (new ModelTableResolver)->resolve($models);
             $tableStats = TableStatsCollector::forConnection($this->tableStatsConnection)?->collect() ?? [];
         }
         $this->graphBuilder->setTableStats($tableStats);
         $statsCount = count($tableStats);
         $this->emit('step:done', ['step' => 'table_stats', 'count' => $statsCount, 'unit' => 'table', 'message' => '    Measured '.$statsCount.' table(s)']);
+
+        // What those models actually read: columns, indexes and foreign keys, from the catalogue
+        // rather than from migrations — migrations say what was intended, and a project of any
+        // age has a schema that no longer matches the sum of them.
+        $this->emit('step:start', ['step' => 'schema', 'label' => 'Reading database schema', 'message' => '  → Reading database schema...']);
+        $schemas = [];
+        if ($this->schemaEnabled) {
+            $tables = [];
+            foreach ($models as $definition) {
+                if ($definition->table !== '') {
+                    $tables[] = $definition->table;
+                }
+            }
+
+            $schemas = SchemaInspector::forConnection($this->schemaConnection)?->inspect($tables) ?? [];
+        }
+        $tableByFqcn = [];
+        foreach ($models as $fqcn => $definition) {
+            if ($definition->table !== '') {
+                $tableByFqcn[ltrim((string) $fqcn, '\\')] = $definition->table;
+            }
+        }
+        $this->graphBuilder->setTableSchemas($schemas, $tableByFqcn);
+        $this->emit('step:done', ['step' => 'schema', 'count' => count($schemas), 'unit' => 'table', 'message' => '    Read '.count($schemas).' table schema(s)']);
 
         $this->emit('step:start', ['step' => 'observers', 'label' => 'Scanning model observers', 'message' => '  → Scanning model observers...']);
         $observerMap = $this->observerAnalyzer->analyze($projectRoot);
@@ -554,7 +593,7 @@ class ProjectAnalyzer
         $erdModels = $models;
         ksort($erdModels);
 
-        $erd = $this->graphSplitter->buildErdTab($erdModels, $projectName, $analyzedAt, $tableStats);
+        $erd = $this->graphSplitter->buildErdTab($erdModels, $projectName, $analyzedAt, $tableStats, $schemas);
         if ($erd !== null) {
             $split['subgraphs'][$erd['id']] = $erd['graph'];
             $split['manifest'][] = $erd['manifest'];

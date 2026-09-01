@@ -28,7 +28,9 @@ use LaraMint\LaravelBrain\Analysis\ProjectFileIndex;
 use LaraMint\LaravelBrain\Analysis\RelationAutoloading;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
+use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
 use LaraMint\LaravelBrain\Analysis\SourceDirectories;
+use LaraMint\LaravelBrain\Analysis\TableSchema;
 use LaraMint\LaravelBrain\Analysis\TableStats;
 use LaraMint\LaravelBrain\Analysis\ValidationRulesExtractor;
 use LaraMint\LaravelBrain\Parser\PhpExtendsFqcnResolver;
@@ -1958,9 +1960,26 @@ class GraphBuilder
             'relationships' => $def !== null ? $def->relationships : [],
         ];
 
+        // Each side keeps the lookup it shipped with. Stats are read from the definition, which
+        // is what #115 does today; the schema resolves the table through `tableByFqcn` first,
+        // because three of the four paths that create a model node pass no definition at all.
+        // Giving stats the same fallback would put them on many more nodes — a change worth
+        // making deliberately, not inside a conflict resolution.
         $stats = $def !== null ? $this->statsFor($def->table) : null;
         if ($stats !== null) {
             $data['tableStats'] = $stats;
+        }
+
+        // `??` already swallows a read on a null `$def`, so the nullsafe operator would be noise.
+        $table = $this->tableByFqcn[ltrim($fqcn, '\\')] ?? $def->table ?? '';
+        $schema = $table !== '' ? ($this->tableSchemas[$table] ?? null) : null;
+        if ($schema !== null) {
+            $data['schema'] = $schema->toArray();
+
+            $issues = (new SchemaIssueBuilder)->forTable($schema);
+            if ($issues !== null) {
+                $data['security'] = $issues;
+            }
         }
 
         $this->graph->addNode(new Node($id, 'model', $short, $data));
@@ -1993,6 +2012,37 @@ class GraphBuilder
         }
 
         return $this->tableStats[$table]->toArray();
+    }
+
+    /**
+     * The live shape of each table a model reads, keyed by table name. Empty when the scan read
+     * no database, which is the ordinary case in CI.
+     *
+     * @var array<string, TableSchema>
+     */
+    private array $tableSchemas = [];
+
+    /**
+     * Which table each model reads, keyed by FQCN.
+     *
+     * Kept separately from the definitions because three of the four paths that create a model
+     * node pass no definition at all — a related model, an observed model, a model reached from a
+     * channel. Keying the schema on the definition meant those nodes silently went without,
+     * which is most of them: `InventoryMovement` had its schema on the ERD tab and on none of the
+     * 34 route tabs it also appears on.
+     *
+     * @var array<string, string>
+     */
+    private array $tableByFqcn = [];
+
+    /**
+     * @param  array<string, TableSchema>  $schemas
+     * @param  array<string, string>  $tableByFqcn
+     */
+    public function setTableSchemas(array $schemas, array $tableByFqcn = []): void
+    {
+        $this->tableSchemas = $schemas;
+        $this->tableByFqcn = $tableByFqcn;
     }
 
     private function addEventNode(string $fqcn, string $id): void

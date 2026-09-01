@@ -479,6 +479,30 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Database Schema
+    // -------------------------------------------------------------------------
+    // The real shape of each model's table — columns, indexes and foreign keys —
+    // read from the database catalogue during a scan, and used to flag a foreign key
+    // that has no index to read it by.
+    //
+    // Read from the catalogue rather than from migrations on purpose: migrations say
+    // what was intended, and any project of age has a schema that no longer matches
+    // the sum of them. Everything goes through Laravel's own schema builder, so the
+    // rows are identical on PostgreSQL, MySQL, MariaDB, SQLite and SQL Server.
+    //
+    // This is one of the parts of a scan that touches a database, and it fails quietly
+    // — no connection, no permission, an unreadable table — so leaving it on costs
+    // nothing where there is nothing to read. Turn it off for a purely static scan, or
+    // name a connection when the models do not live on the default one:
+    //
+    //   'connection' => 'tenant',
+    //
+    'schema' => [
+        'enabled' => env('LARAVEL_BRAIN_SCHEMA', true),
+        'connection' => null,
+    ],
+
+    // -------------------------------------------------------------------------
     // Livewire Component Search Paths
     // -------------------------------------------------------------------------
     // Directories (relative to project root) that are searched when resolving

@@ -12,6 +12,8 @@ use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
+use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
+use LaraMint\LaravelBrain\Analysis\TableSchema;
 use LaraMint\LaravelBrain\Analysis\TableStats;
 
 class TabManifestEntry
@@ -289,9 +291,16 @@ class GraphSplitter
      *
      * @param  array<string, ModelDefinition>  $models
      * @param  array<string, TableStats>  $tableStats  Keyed by table name; empty when no database was read.
+     * @param  array<string, TableSchema>  $schemas  Keyed by table name; empty when no database was read.
      * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
      */
-    public function buildErdTab(array $models, string $projectName, string $analyzedAt, array $tableStats = []): ?array
+    public function buildErdTab(
+        array $models,
+        string $projectName,
+        string $analyzedAt,
+        array $tableStats = [],
+        array $schemas = [],
+    ): ?array
     {
         if (empty($models)) {
             return null;
@@ -333,14 +342,23 @@ class GraphSplitter
                 ],
             ));
 
-            if ($def->table !== '' && isset($tableStats[$def->table])) {
+            // Two independent readings of the same table, and a model may have either, both or
+            // neither: how much it holds, and what shape it is in. Written in one update because
+            // `updateNodeData` replaces rather than merges — two sequential writes would have the
+            // second drop whatever the first added.
+            $stats = $def->table !== '' ? ($tableStats[$def->table] ?? null) : null;
+            $schema = $def->table !== '' ? ($schemas[$def->table] ?? null) : null;
+
+            if ($stats !== null || $schema !== null) {
                 $node = $graph->getNode($nodeId);
                 if ($node !== null) {
-                    // `updateNodeData` replaces rather than merges, so the existing payload is
-                    // carried across explicitly.
+                    $issues = $schema !== null ? (new SchemaIssueBuilder)->forTable($schema) : null;
+
                     $graph->updateNodeData($nodeId, [
                         ...$node->data,
-                        'tableStats' => $tableStats[$def->table]->toArray(),
+                        ...($stats !== null ? ['tableStats' => $stats->toArray()] : []),
+                        ...($schema !== null ? ['schema' => $schema->toArray()] : []),
+                        ...($issues !== null ? ['security' => $issues] : []),
                     ]);
                 }
             }

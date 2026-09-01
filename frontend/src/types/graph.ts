@@ -62,6 +62,19 @@ export interface TableStatsData {
   totalBytes: number | null
   /** Row counts are the planner's estimate on most engines — cheap, and honest about it. */
   rowsEstimated: boolean
+/** The live shape of a model's table, as the database catalogue reports it. */
+export interface TableSchemaData {
+  table: string
+  columns: { name: string; type: string; nullable: boolean; default: string | null; autoIncrement: boolean }[]
+  indexes: { name: string; columns: string[]; unique: boolean; primary: boolean }[]
+  foreignKeys: {
+    name: string
+    columns: string[]
+    foreignTable: string
+    foreignColumns: string[]
+    onDelete: string | null
+    onUpdate: string | null
+  }[]
 }
 
 export interface ErdModelData {

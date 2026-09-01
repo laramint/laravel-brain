@@ -173,6 +173,7 @@ export const SECURITY_SEVERITY_LABELS: Record<string, string> = {
 
 /** Issue type → icon + readable name */
 export const SECURITY_ISSUE_META: Record<string, { icon: string; name: string }> = {
+  MISSING_FK_INDEX: { icon: '🔑', name: 'Unindexed foreign key' },
   MASS_ASSIGNMENT:    { icon: '⚡', name: 'Mass Assignment'      },
   UNVALIDATED_INPUT:  { icon: '⚠️', name: 'Unvalidated Input'   },
   MISSING_THROTTLE:   { icon: '🔓', name: 'Missing Throttle'    },
