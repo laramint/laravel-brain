@@ -353,6 +353,35 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Morph Map Aliases
+    // -------------------------------------------------------------------------
+    // Shows each model the short alias `Relation::morphMap()` gives it — the value
+    // that actually lands in your `*_type` columns, and so the one you hold when
+    // you arrive from a row or a query — beside the other facts on the model's
+    // detail panel. Where the application calls `requireMorphMap()`, a model left
+    // out of the map is flagged: there is no fallback to the class name, so the
+    // first `getMorphClass()` call on it throws.
+    //
+    // Unlike everything else in this file, this one fact is read from the RUNNING
+    // application rather than parsed out of your source. A scan runs inside your
+    // own app, so `Relation::morphMap()` already holds the whole answer — including
+    // aliases a package registered in its own provider, a config value supplied, or
+    // a branch only one environment takes, none of which a file parser can see.
+    //
+    // It costs a single read of a static array, once per scan, so scan time is not
+    // the reason to turn it off. The reason is the other one: this is the escape
+    // hatch if you would rather the scanner did not touch framework state at all.
+    // Off means `Relation::morphMap()` is never consulted — not consulted and the
+    // answer discarded. Your models still appear; they simply carry no alias, and
+    // nothing is flagged as missing one.
+    //
+    // Override via the LARAVEL_BRAIN_MORPH_MAP_ENABLED env variable.
+    //
+    'morph_map' => [
+        'enabled' => env('LARAVEL_BRAIN_MORPH_MAP_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // Filament Search Paths
     // -------------------------------------------------------------------------
     // Directories (relative to the project root) scanned for Filament panels and

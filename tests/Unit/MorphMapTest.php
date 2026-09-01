@@ -57,6 +57,22 @@ it('treats a map as advisory unless the application enforces one', function () {
 it('reads the aliases the running application registered', function () {
     // The whole reason this is a runtime read: aliases arrive from packages, config values and
     // conditionals, none of which a provider parser can see.
+    $alias = withMorphMap(['parcel' => 'App\\Models\\Parcel'], false, fn () => MorphMap::fromApplication(enabled: true)->aliasFor('App\\Models\\Parcel'));
+
+    expect($alias)->toBe('parcel');
+});
+
+it('asks the framework nothing when the switch is off', function () {
+    // `laravel-brain.morph_map.enabled` is the escape hatch for anyone who would rather the
+    // scanner did not touch framework state, so off has to mean the map is never read — with a
+    // map registered AND enforced, the answer must still be the empty one.
+    $map = withMorphMap(['parcel' => 'App\\Models\\Parcel'], true, fn () => MorphMap::fromApplication(enabled: false));
+
+    expect($map->aliasFor('App\\Models\\Parcel'))->toBeNull()
+        ->and($map->isEnforced())->toBeFalse();
+});
+
+it('leaves the lookup on when nobody sets the switch', function () {
     $alias = withMorphMap(['parcel' => 'App\\Models\\Parcel'], false, fn () => MorphMap::fromApplication()->aliasFor('App\\Models\\Parcel'));
 
     expect($alias)->toBe('parcel');

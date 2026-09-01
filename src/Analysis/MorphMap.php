@@ -53,9 +53,19 @@ final class MorphMap
      * scan run outside one — it simply reads empty, which is already the safe answer: no aliases
      * to show, and nothing flagged as missing one. The catch covers the rest. A scan that has
      * already read an entire project should not end on a state read.
+     *
+     * @param  bool  $enabled  `laravel-brain.morph_map.enabled`. The switch is here, ahead of the
+     *                         only line in this package that touches framework state, rather than
+     *                         at the caller filtering the result afterwards: turning it off is
+     *                         meant to mean the scanner never asks, and a gate that reads first
+     *                         and discards second would not deliver that.
      */
-    public static function fromApplication(): self
+    public static function fromApplication(bool $enabled = true): self
     {
+        if (! $enabled) {
+            return new self;
+        }
+
         try {
             return new self(Relation::morphMap(), (bool) Relation::requiresMorphMap());
         } catch (Throwable) {
