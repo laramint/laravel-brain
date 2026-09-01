@@ -334,3 +334,58 @@ it('charts the same steps with detection off, minus the cache typing', function 
         ->and(array_column($off, 'type'))->toBe(['assign', 'call', 'return'])
         ->and(array_column($on, 'type'))->toBe(['cache', 'call', 'return']);
 });
+
+/** The cache operation on the first flow step that carries one. */
+function firstCacheOp(string $body): ?array
+{
+    $walk = function (array $steps) use (&$walk): ?array {
+        foreach ($steps as $step) {
+            if (isset($step['cache']) && is_array($step['cache'])) {
+                return $step['cache'];
+            }
+            foreach (['body', 'then', 'else'] as $branch) {
+                if (! empty($step[$branch]) && is_array($step[$branch])) {
+                    $found = $walk($step[$branch]);
+                    if ($found !== null) {
+                        return $found;
+                    }
+                }
+            }
+        }
+
+        return null;
+    };
+
+    return $walk(flowFor($body));
+}
+
+it('keeps a used lock a lock, rather than reading the verb applied to it', function () {
+    // The only way anyone writes a lock. This goes through FlowExtractor on purpose: it hands
+    // the detector the statement's outermost call and nothing else, which is what the pipeline
+    // does. A test that walks into the expression finds the inner `Cache::lock(...)` by itself
+    // and passes whatever the chain rule does — measured on a 60-module application, 16
+    // `Cache::lock` calls produced 0 lock operations while such a test stayed green.
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::lock("imports", 10)->get(fn () => 1);');
+
+    expect($op)->not->toBeNull()
+        ->and($op['kind'])->toBe('lock')
+        ->and($op['key'])->toBe('imports');
+});
+
+it('reads a blocking lock the same way', function () {
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::lock("imports")->block(5, fn () => 1);');
+
+    expect($op['kind'] ?? null)->toBe('lock');
+});
+
+it('sees through a memoising repository to the operation on it', function () {
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::memo()->get("rates");');
+
+    expect($op)->not->toBeNull()
+        ->and($op['kind'])->toBe('read')
+        ->and($op['key'])->toBe('rates');
+});
+
+it('still refuses a chain that does not start at the cache', function () {
+    expect(firstCacheOp('        $this->mutex->lock("imports")->get(fn () => 1);'))->toBeNull();
+});
