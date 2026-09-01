@@ -147,6 +147,7 @@ class RulesExporter
         $counts = [
             'Routes' => $tc['route'] ?? 0,
             'Actions' => $tc['action'] ?? 0,
+            'Action classes' => $tc['action_class'] ?? 0,
             'Services' => $tc['service'] ?? 0,
             'Validation requests' => $tc['validation_request'] ?? 0,
             'Models' => $tc['model'] ?? 0,

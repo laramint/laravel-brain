@@ -11,7 +11,7 @@ interface Props {
   selectedId: string | null
 }
 
-const COMPLEXITY_TYPES = new Set(['action', 'service', 'validation_request', 'controller', 'job', 'command'])
+const COMPLEXITY_TYPES = new Set(['action', 'action_class', 'service', 'validation_request', 'controller', 'job', 'command'])
 
 const FILTER_TITLES: Record<'all' | 'complex' | 'critical', string> = {
   all: 'All analyzed methods with cyclomatic complexity above 0 (actions, services, controllers, jobs, commands).',

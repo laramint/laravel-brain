@@ -235,6 +235,10 @@ class ProjectAnalyzer
         $this->graphBuilder->setCacheOperationsEnabled(
             (bool) config('laravel-brain.cache_operations.enabled', true),
         );
+        $actionPaths = config('laravel-brain.actions.paths', ActionClasses::DEFAULT_PATHS);
+        $this->graphBuilder->setActionPaths(
+            is_array($actionPaths) ? $actionPaths : ActionClasses::DEFAULT_PATHS,
+        );
         $livewirePaths = config('laravel-brain.livewire.component_paths', []);
         if (is_array($livewirePaths) && $livewirePaths !== []) {
             $this->graphBuilder->setLivewireComponentPaths($livewirePaths);

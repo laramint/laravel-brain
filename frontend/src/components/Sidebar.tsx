@@ -29,6 +29,7 @@ const TYPE_COLORS: Record<string, string> = {
   middleware: '#FF9800',
   controller: '#2196F3',
   action:     '#03A9F4',
+  action_class: '#84cc16',
   service:    '#9C27B0',
   validation_request: '#0d9488',
   model:      '#F44336',

@@ -3,7 +3,7 @@ import { ACCENT_COLORS } from './graphConstants'
 
 /** Order columns left-to-right (tokens match `normalizeType` where applicable). */
 const TYPE_PRIORITY = [
-  'route', 'middleware', 'controller', 'action', 'validation_request', 'service', 'model', 'event', 'job',
+  'route', 'middleware', 'controller', 'action', 'validation_request', 'action_class', 'service', 'model', 'event', 'job',
   'command', 'channel', 'schedule', 'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
   'ai_agent', 'ai_tool',
 ]

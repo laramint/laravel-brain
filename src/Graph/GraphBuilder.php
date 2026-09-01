@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
 use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
 use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
+use LaraMint\LaravelBrain\Analysis\ActionClasses;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
 use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
@@ -115,6 +116,11 @@ class GraphBuilder
 
     /** Whether cache operations are detected and attached at all — see setCacheOperationsEnabled(). */
     private bool $cacheOperationsEnabled = true;
+    /** @var string[] action-class roots, relative to the project root */
+    private array $actionPaths = ActionClasses::DEFAULT_PATHS;
+
+    /** Built once per build(), when the project root is known. */
+    private ?ActionClasses $actionClasses = null;
 
     private ?ContainerBindingRegistry $bindingRegistry = null;
 
@@ -211,6 +217,22 @@ class GraphBuilder
         if ($paths !== []) {
             $this->sourcePaths = $paths;
         }
+    }
+
+    /**
+     * The directories whose classes are single-purpose action classes.
+     *
+     * Unlike the setters above, an empty array is honoured rather than treated as "keep the
+     * default". Source and view paths are load-bearing — a scan with none of either finds
+     * nothing — so falling back there is a safety net. This kind is additive: an application
+     * that does not use the pattern says so with an empty array, and gets no action-class
+     * nodes rather than the default `app/Actions` reinstated behind its back.
+     *
+     * @param  string[]  $paths  relative to the project root; glob patterns are expanded
+     */
+    public function setActionPaths(array $paths): void
+    {
+        $this->actionPaths = $paths;
     }
 
     /**
@@ -547,6 +569,7 @@ class GraphBuilder
             $this->psr4Map = $this->buildFullPsr4Map($projectRoot);
         }
         $this->projectRoot = $projectRoot;
+        $this->actionClasses = new ActionClasses($projectRoot, $this->actionPaths, $this->parser);
         $this->classMetrics = [];
         $this->edgeIdOccurrence = [];
         $this->seenControllerExtendsEdges = [];
@@ -1046,6 +1069,23 @@ class GraphBuilder
                 $this->addHopServiceClassNode($id, $fqcn, $method, 'validation_request', 'validation_request');
                 break;
 
+            case 'action_class':
+                // What makes it an action class is the single way in, so the node carries it.
+                // `entryMethod` is the declared entry point and `method` is the one this hop
+                // actually called: normally the same string, and worth telling apart when they
+                // are not — a caller reaching past `handle()` into a helper is exactly the
+                // thing the pattern is supposed to prevent, and the two fields show it.
+                $entryMethod = $this->actionClasses?->entryMethod($this->resolveFile($fqcn));
+                $this->addHopServiceClassNode(
+                    $id,
+                    $fqcn,
+                    $method,
+                    'action_class',
+                    'action_class',
+                    $entryMethod === null ? [] : ['entryMethod' => $entryMethod],
+                );
+                break;
+
             case 'facade':
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
@@ -1080,10 +1120,11 @@ class GraphBuilder
     }
 
     /**
-     * Service-like lifecycle hops (app services vs Form Request rule hosts).
+     * Service-like lifecycle hops (app services, Form Request rule hosts, action classes).
      *
-     * @param  'service'|'validation_request'  $graphNodeType
-     * @param  'service'|'validation_request'  $dataSubtype
+     * @param  'service'|'validation_request'|'action_class'  $graphNodeType
+     * @param  'service'|'validation_request'|'action_class'  $dataSubtype
+     * @param  array<string, mixed>  $extraData  merged into the node's data, last
      */
     private function addHopServiceClassNode(
         string $id,
@@ -1091,6 +1132,7 @@ class GraphBuilder
         string $method,
         string $graphNodeType,
         string $dataSubtype,
+        array $extraData = [],
     ): void {
         $short = class_basename($fqcn);
         $file = $this->resolveFile($fqcn);
@@ -1112,6 +1154,7 @@ class GraphBuilder
             ...$this->httpCallData($flowSteps),
             ...($this->isFatMethod($svcMetrics) ? ['fatMethod' => true] : []),
             ...(empty($validationRules) ? [] : ['validationRules' => $validationRules]),
+            ...$extraData,
         ]));
         if ($methodLocation !== null && $methodLocation['declaringFqcn'] !== $fqcn) {
             $this->wireInheritedMethodDelegation($id, $methodLocation, $method);
@@ -1215,6 +1258,12 @@ class GraphBuilder
             return 'validation_request';
         }
 
+        // Last, so every more specific kind wins. Only a class nothing else recognised —
+        // one this method was about to call a plain `service` — can become an action class.
+        if ($this->actionClasses !== null && $this->actionClasses->isActionClass($file)) {
+            return 'action_class';
+        }
+
         return 'service';
     }
 
@@ -1236,6 +1285,7 @@ class GraphBuilder
             'trait' => 'uses',
             'abstract_class' => 'calls',
             'facade' => 'calls',
+            'action_class' => 'runs',
             default => 'calls',
         };
     }

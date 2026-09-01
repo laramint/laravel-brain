@@ -8,6 +8,7 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   controller: 'Controllers',
   livewire_component: 'Livewire',
   action: 'Actions',
+  action_class: 'Action classes',
   service: 'Services',
   validation_request: 'Validation',
   model: 'Models',
@@ -38,7 +39,7 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
 
 // Stable order matching App.tsx ALL_TYPES
 const ORDER: GraphNode['type'][] = [
-  'route', 'middleware', 'controller', 'livewire_component', 'action', 'service',
+  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service',
   'validation_request', 'model', 'event', 'listener', 'job', 'command', 'channel', 'schedule',
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
   'service_provider', 'facade', 'ai_agent', 'ai_tool',
