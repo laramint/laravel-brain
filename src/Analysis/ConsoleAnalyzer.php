@@ -45,13 +45,34 @@ class ScheduleEntry
          * @var array<int, array<string, mixed>>
          */
         public array $flowSteps = [],
+        /**
+         * The closure a `call()` task runs, kept so the tracer can descend from it.
+         *
+         * A closure route already carries its node for exactly this reason. Without it the only
+         * scheduled work with no class behind it is also the only one whose calls never become
+         * nodes, so its tab holds the task and nothing it sets off.
+         */
+        public Node\Expr\Closure|Node\Expr\ArrowFunction|null $closureNode = null,
+        /** @var array<string, string> */
+        public array $closureUseMap = [],
     ) {}
 
     /**
      * @param  array<int, array<string, mixed>>  $flowSteps
      */
-    public static function fromChain(string $type, string $target, string $file, ScheduleChain $chain, array $flowSteps = []): self
-    {
+    /**
+     * @param  array<int, array<string, mixed>>  $flowSteps
+     * @param  array<string, string>  $closureUseMap
+     */
+    public static function fromChain(
+        string $type,
+        string $target,
+        string $file,
+        ScheduleChain $chain,
+        array $flowSteps = [],
+        Node\Expr\Closure|Node\Expr\ArrowFunction|null $closureNode = null,
+        array $closureUseMap = [],
+    ): self {
         return new self(
             type: $type,
             target: $target,
@@ -61,6 +82,8 @@ class ScheduleEntry
             modifiers: $chain->modifiers,
             timezone: $chain->timezone,
             flowSteps: $flowSteps,
+            closureNode: $closureNode,
+            closureUseMap: $closureUseMap,
         );
     }
 
@@ -115,13 +138,19 @@ class ConsoleAnalyzer
      */
     public static function closureFlowSteps(?Node\Arg $arg): array
     {
+        $closure = self::closureArgument($arg);
+
+        return $closure === null ? [] : (new FlowExtractor)->extractFromClosure($closure);
+    }
+
+    /** The closure a registration was handed, or null when it was handed anything else. */
+    public static function closureArgument(?Node\Arg $arg): Node\Expr\Closure|Node\Expr\ArrowFunction|null
+    {
         $closure = $arg?->value;
 
-        if (! $closure instanceof Node\Expr\Closure && ! $closure instanceof Node\Expr\ArrowFunction) {
-            return [];
-        }
-
-        return (new FlowExtractor)->extractFromClosure($closure);
+        return $closure instanceof Node\Expr\Closure || $closure instanceof Node\Expr\ArrowFunction
+            ? $closure
+            : null;
     }
 
     /**
@@ -278,7 +307,7 @@ class ConsoleAnalyzer
         $schedule = [];
 
         $traverser = new NodeTraverser;
-        $visitor = new class($file) extends NodeVisitorAbstract
+        $visitor = new class($file, $parsed['useMap'] ?? []) extends NodeVisitorAbstract
         {
             public array $commands = [];
 
@@ -286,7 +315,8 @@ class ConsoleAnalyzer
 
             private ScheduleChainIndex $chains;
 
-            public function __construct(private string $file)
+            /** @param array<string, string> $useMap */
+            public function __construct(private string $file, private array $useMap)
             {
                 $this->chains = new ScheduleChainIndex;
             }
@@ -331,6 +361,8 @@ class ConsoleAnalyzer
                             $this->file,
                             $this->chains->for($node),
                             ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
+                            ConsoleAnalyzer::closureArgument($node->args[0] ?? null),
+                            $this->useMap,
                         );
                     }
                 }
@@ -643,6 +675,8 @@ class ConsoleAnalyzer
                             $this->file,
                             $this->chains->for($node),
                             ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
+                            ConsoleAnalyzer::closureArgument($node->args[0] ?? null),
+                            $this->useMap,
                         );
                     }
                 }

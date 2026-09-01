@@ -3,6 +3,7 @@
 namespace App\Console;
 
 use App\Jobs\PruneOldExports;
+use App\Models\Report;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\Cache;

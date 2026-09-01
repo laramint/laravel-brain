@@ -115,3 +115,21 @@ it('leaves a command task without a closure body rather than inventing one', fun
 
     expect(collect($schedules)->firstWhere('type', 'command')->flowSteps)->toBe([]);
 });
+
+it('carries the closure so the tracer can descend from it', function () {
+    // Charting the body is not the same as charting what it calls. A closure route is already
+    // traced this way; without the node, a scheduled closure would be the only entry point whose
+    // calls could never become nodes of their own.
+    $schedules = (new ConsoleAnalyzer)->analyze(fixture('scheduled-project'))['schedule'];
+
+    $closure = collect($schedules)->firstWhere('type', 'call');
+
+    expect($closure->closureNode)->not->toBeNull()
+        ->and($closure->closureUseMap)->toHaveKey('Report');
+});
+
+it('leaves a command task carrying no closure to descend into', function () {
+    $schedules = (new ConsoleAnalyzer)->analyze(fixture('scheduled-project'))['schedule'];
+
+    expect(collect($schedules)->firstWhere('type', 'command')->closureNode)->toBeNull();
+});

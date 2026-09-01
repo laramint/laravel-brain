@@ -1097,8 +1097,8 @@ class GraphBuilder
             return $this->viewNodeId($fqcn);
         }
 
-        // Closure route virtual FQCN — the string IS the route node ID already
-        if (str_starts_with($fqcn, 'route::')) {
+        // Closure route and scheduled-closure virtual FQCNs — the string IS the node ID already
+        if (str_starts_with($fqcn, 'route::') || str_starts_with($fqcn, 'schedule::')) {
             return $fqcn;
         }
 
