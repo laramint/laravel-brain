@@ -500,6 +500,14 @@ return [
     'schema' => [
         'enabled' => env('LARAVEL_BRAIN_SCHEMA', true),
         'connection' => null,
+
+        // Seconds to wait for the database to answer before giving up and reading no schema.
+        //
+        // A refused connection fails instantly, but a host that drops packets — a database
+        // reached over a VPN that is not up — blocks for PDO's default of 30 seconds, on every
+        // scan and on every poll in watch mode. This bounds that wait; the failure stays quiet,
+        // it just stops being expensive. Set null to leave the driver's own default.
+        'timeout' => env('LARAVEL_BRAIN_SCHEMA_TIMEOUT', 2),
     ],
 
     // -------------------------------------------------------------------------

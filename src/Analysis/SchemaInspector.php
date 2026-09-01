@@ -6,6 +6,7 @@ namespace LaraMint\LaravelBrain\Analysis;
 
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
+use PDO;
 use Throwable;
 
 /**
@@ -28,6 +29,12 @@ use Throwable;
  */
 class SchemaInspector
 {
+    /**
+     * Name of the throwaway connection the timeout is applied to, so the application's own
+     * connection keeps the settings it was configured with.
+     */
+    private const DERIVED_CONNECTION = 'laravel-brain-schema';
+
     public function __construct(private readonly Connection $connection) {}
 
     /**
@@ -36,16 +43,70 @@ class SchemaInspector
      * Resolution is the only part that needs a container, so it lives here rather than in the
      * constructor — which leaves the inspector something you can hand a connection to and test
      * against a real database.
+     *
+     * The connection is opened *here*, eagerly, rather than left to the first query in
+     * {@see inspect()}. Two reasons. A database that cannot be reached is not a database this
+     * can read, so the whole feature turning itself off is the honest outcome — and forcing the
+     * connect is the only way the bound below applies to it, since `DB::connection()` resolves
+     * lazily and would otherwise carry the wait into the middle of the scan.
+     *
+     * @param  int|null  $timeout  seconds to wait for the connection; null leaves the driver's
+     *                             own default, which is 30 seconds on PDO
      */
-    public static function forConnection(?string $connection = null): ?self
+    public static function forConnection(?string $connection = null, ?int $timeout = null): ?self
     {
         try {
-            $resolved = DB::connection($connection);
+            $resolved = DB::connection(self::connectionName($connection, $timeout));
+
+            if (! $resolved instanceof Connection) {
+                return null;
+            }
+
+            $resolved->getPdo();
         } catch (Throwable) {
             return null;
         }
 
-        return $resolved instanceof Connection ? new self($resolved) : null;
+        return new self($resolved);
+    }
+
+    /**
+     * The connection to open: the one asked for, or a copy of it carrying a connect timeout.
+     *
+     * The copy exists so the bound never reaches the application's own connection. A scan runs
+     * inside the booted application, and quietly shortening the timeout on the connection the
+     * rest of it uses would be a side effect nobody asked for.
+     *
+     * `PDO::ATTR_TIMEOUT` is the whole mechanism, on PostgreSQL as much as on MySQL. That is
+     * worth stating because the usual advice is the opposite — that PDO_PGSQL ignores the
+     * attribute and libpq must be told through `PGCONNECT_TIMEOUT` instead. Measured against a
+     * host that drops packets, on this driver pairing, it is the other way round:
+     *
+     *   pgsql, ATTR_TIMEOUT=2 only        2.01s
+     *   pgsql, PGCONNECT_TIMEOUT=2 only  30.01s
+     *
+     * so the environment variable was built and then removed again, as it bounds nothing here.
+     * Drivers that do not read the attribute ignore it harmlessly.
+     */
+    private static function connectionName(?string $connection, ?int $timeout): ?string
+    {
+        $name = $connection ?? config('database.default');
+
+        if ($timeout === null || $timeout <= 0 || ! is_string($name)) {
+            return $connection;
+        }
+
+        $config = config("database.connections.{$name}");
+
+        if (! is_array($config)) {
+            return $connection;
+        }
+
+        $config['options'] = (array) ($config['options'] ?? []) + [PDO::ATTR_TIMEOUT => $timeout];
+
+        config()->set('database.connections.'.self::DERIVED_CONNECTION, $config);
+
+        return self::DERIVED_CONNECTION;
     }
 
     /**

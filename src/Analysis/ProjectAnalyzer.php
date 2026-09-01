@@ -80,6 +80,8 @@ class ProjectAnalyzer
 
     private ?string $schemaConnection = null;
 
+    private ?int $schemaTimeout = null;
+
     /** @var callable(string, array): void */
     private $onProgress;
 
@@ -179,6 +181,11 @@ class ProjectAnalyzer
         $schemaConnection = config('laravel-brain.schema.connection');
         $this->schemaConnection = is_string($schemaConnection) && $schemaConnection !== ''
             ? $schemaConnection
+            : null;
+
+        $schemaTimeout = config('laravel-brain.schema.timeout', 2);
+        $this->schemaTimeout = is_numeric($schemaTimeout) && (int) $schemaTimeout > 0
+            ? (int) $schemaTimeout
             : null;
 
         $this->graphBuilder->setSourcePaths($sourcePaths);
@@ -427,7 +434,8 @@ class ProjectAnalyzer
                 }
             }
 
-            $schemas = SchemaInspector::forConnection($this->schemaConnection)?->inspect($tables) ?? [];
+            $schemas = SchemaInspector::forConnection($this->schemaConnection, $this->schemaTimeout)
+                ?->inspect($tables) ?? [];
         }
         $tableByFqcn = [];
         foreach ($models as $fqcn => $definition) {
