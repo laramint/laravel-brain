@@ -5,6 +5,7 @@ declare(strict_types=1);
 use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
 use LaraMint\LaravelBrain\Analysis\AiAnalyzer;
 use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
+use LaraMint\LaravelBrain\Parser\PhpFileParser;
 
 /**
  * @param  array{detected: bool, agents: AiAgentDefinition[], tools: AiToolDefinition[], callSites: mixed}  $result
@@ -42,6 +43,41 @@ it('reports detected=false for a project that never names laravel/ai', function 
         ->agents->toBe([])
         ->tools->toBe([])
         ->callSites->toBe([]);
+});
+
+it('scans by default when the SDK is referenced', function () {
+    $analyzer = new AiAnalyzer;
+
+    expect($analyzer->isEnabled())->toBeTrue();
+    expect($analyzer->analyze(fixture('laravel-ai-project'))['detected'])->toBeTrue();
+});
+
+it('reports nothing when the feature is switched off, even where the SDK is used', function () {
+    $result = (new AiAnalyzer(['app'], enabled: false))->analyze(fixture('laravel-ai-project'));
+
+    expect($result)
+        ->detected->toBeFalse()
+        ->agents->toBe([])
+        ->tools->toBe([])
+        ->callSites->toBe([]);
+});
+
+it('parses nothing at all when the feature is switched off', function () {
+    // Off has to mean no work, not work whose result is thrown away. The parse counter is the
+    // observable difference; the shared cache is cleared so an earlier test's parse of the same
+    // fixture cannot make the enabled run look free too.
+    PhpFileParser::clearSharedCache();
+    $before = PhpFileParser::$parseCount;
+    (new AiAnalyzer(['app'], enabled: false))->analyze(fixture('laravel-ai-project'));
+    $whenOff = PhpFileParser::$parseCount - $before;
+
+    PhpFileParser::clearSharedCache();
+    $before = PhpFileParser::$parseCount;
+    (new AiAnalyzer(['app'], enabled: true))->analyze(fixture('laravel-ai-project'));
+    $whenOn = PhpFileParser::$parseCount - $before;
+
+    expect($whenOff)->toBe(0);
+    expect($whenOn)->toBeGreaterThan(0);
 });
 
 it('detects agents declared through the SDK contract', function () {

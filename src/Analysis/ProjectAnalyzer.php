@@ -162,6 +162,7 @@ class ProjectAnalyzer
         $aiPaths = config('laravel-brain.ai.paths', $sourcePaths);
         $this->aiAnalyzer = new AiAnalyzer(
             is_array($aiPaths) && $aiPaths !== [] ? $aiPaths : $sourcePaths,
+            (bool) config('laravel-brain.ai.enabled', true),
         );
 
         $this->queryTracer = new QueryTracer($sourcePaths);
@@ -526,10 +527,14 @@ class ProjectAnalyzer
             $this->emit('step:done', ['step' => 'filament_chains', 'count' => count($filamentPageEdges), 'unit' => 'call edge', 'message' => '    Discovered '.count($filamentPageEdges).' Filament page call chain edge(s)']);
         }
 
-        $this->emit('step:start', ['step' => 'ai', 'label' => 'Scanning AI agents', 'message' => '  → Scanning AI agents...']);
-        $aiResult = $this->aiAnalyzer->analyze($projectRoot);
-        $agentCount = count($aiResult['agents']);
-        $this->emit('step:done', ['step' => 'ai', 'count' => $agentCount, 'unit' => 'agent', 'extra' => count($aiResult['tools']).' tools', 'message' => '    Found '.$agentCount.' AI agent(s), '.count($aiResult['tools']).' tool(s)']);
+        // Switched off skips the step outright rather than reporting a scan that found nothing.
+        $aiResult = AiAnalyzer::emptyResult();
+        if ($this->aiAnalyzer->isEnabled()) {
+            $this->emit('step:start', ['step' => 'ai', 'label' => 'Scanning AI agents', 'message' => '  → Scanning AI agents...']);
+            $aiResult = $this->aiAnalyzer->analyze($projectRoot);
+            $agentCount = count($aiResult['agents']);
+            $this->emit('step:done', ['step' => 'ai', 'count' => $agentCount, 'unit' => 'agent', 'extra' => count($aiResult['tools']).' tools', 'message' => '    Found '.$agentCount.' AI agent(s), '.count($aiResult['tools']).' tool(s)']);
+        }
 
         $this->emit('step:start', ['step' => 'queries', 'label' => 'Tracing DB queries', 'message' => '  → Tracing DB queries...']);
         $dbQueryMap = $this->queryTracer->buildQueryMap($callChain, $controllers, $psr4Map, $projectRoot);

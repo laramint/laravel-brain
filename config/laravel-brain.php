@@ -386,24 +386,33 @@ return [
     ],
 
     // -------------------------------------------------------------------------
-    // laravel/ai Search Paths
+    // laravel/ai Agents
     // -------------------------------------------------------------------------
-    // Directories scanned for `laravel/ai` agents and the tools they expose to the
-    // model. Leave this unset and the Source Paths below are used, which is right
-    // for almost every project — agents are ordinary application classes and are
-    // not required to live in a directory of their own.
+    // Puts the application's LLM calls on the graph: one node per `laravel/ai`
+    // agent and per tool it exposes to the model, with the model, provider and
+    // limits each agent will run under.
     //
-    // The scan is inert in an application that does not use the SDK: files are
-    // prefiltered on the literal string `Laravel\Ai\`, so a project without it
-    // pays one read per source file and no parse at all, and contributes no nodes.
+    // 'enabled' is a different question from whether the application uses the SDK
+    // at all. Brain answers that one itself, and the pass is already inert without
+    // it: every source file is tested for the literal string `Laravel\Ai\` before
+    // anything is parsed, so a project that does not use the SDK pays one read per
+    // source file and contributes no nodes. Turn this off when the application DOES
+    // use it and you still want the pass skipped — to keep agents out of an exported
+    // graph, or to drop the one read-and-search per source file on a very large tree.
+    // Off skips the scan entirely rather than discarding its result.
     //
-    // Glob patterns are expanded, as above:
+    // Override via the LARAVEL_BRAIN_AI_ENABLED env variable.
+    //
+    // 'paths' is where agents are looked for. Leave it unset and the Source Paths
+    // below are used, which is right for almost every project — agents are ordinary
+    // application classes and need no directory of their own. Glob patterns are
+    // expanded, as above:
     //
     //   'paths' => ['app-modules/*/src'],
     //
-    // 'ai' => [
-    //     'paths' => ['app/Ai'],
-    // ],
+    'ai' => [
+        'enabled' => env('LARAVEL_BRAIN_AI_ENABLED', true),
+    ],
 
     // -------------------------------------------------------------------------
     // Container Binding Search Paths

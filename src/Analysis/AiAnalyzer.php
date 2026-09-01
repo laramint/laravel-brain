@@ -202,14 +202,43 @@ class AiAnalyzer
     /** @var string[] directories holding application classes, relative to the project root */
     private array $paths;
 
+    private bool $enabled;
+
     /**
      * @param  string[]  $paths  directories (or glob patterns) holding application classes
+     * @param  bool  $enabled  the `laravel-brain.ai.enabled` switch, which is a different question
+     *                         from whether the application uses the SDK: off means "I use it and
+     *                         still do not want it on the graph"
      */
-    public function __construct(array $paths = SourceDirectories::DEFAULT_SOURCE_PATHS)
-    {
+    public function __construct(
+        array $paths = SourceDirectories::DEFAULT_SOURCE_PATHS,
+        bool $enabled = true,
+    ) {
         $this->parser = new PhpFileParser;
         $this->finder = new NodeFinder;
         $this->paths = $paths !== [] ? $paths : SourceDirectories::DEFAULT_SOURCE_PATHS;
+        $this->enabled = $enabled;
+    }
+
+    public function isEnabled(): bool
+    {
+        return $this->enabled;
+    }
+
+    /**
+     * The shape analyze() returns when there is nothing to report, shared with callers that skip
+     * the pass entirely so they need not spell it out a second time.
+     *
+     * @return array{
+     *   detected: bool,
+     *   agents: AiAgentDefinition[],
+     *   tools: AiToolDefinition[],
+     *   callSites: AiAgentCallSite[],
+     * }
+     */
+    public static function emptyResult(): array
+    {
+        return ['detected' => false, 'agents' => [], 'tools' => [], 'callSites' => []];
     }
 
     /**
@@ -222,7 +251,13 @@ class AiAnalyzer
      */
     public function analyze(string $projectRoot): array
     {
-        $empty = ['detected' => false, 'agents' => [], 'tools' => [], 'callSites' => []];
+        $empty = self::emptyResult();
+
+        // Before the directory scan, not after it: switched off has to cost nothing, rather than
+        // doing the work and dropping the answer.
+        if (! $this->enabled) {
+            return $empty;
+        }
 
         $files = $this->phpFiles($projectRoot);
         if ($files === []) {

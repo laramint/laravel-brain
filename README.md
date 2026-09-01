@@ -406,14 +406,17 @@ Alongside the model, the agent node carries provider, max steps, max tokens, tem
 
 `laravel/ai` is optional and will not be installed in most applications. Nothing in this pass imports one of its classes; detection is by fully-qualified name matched against the AST. Source files are prefiltered on the literal string `Laravel\Ai\`, so an application that does not use the SDK pays one read per source file, parses nothing, and contributes no nodes.
 
-Agents are ordinary application classes, so the scan follows `source_paths` by default. Point it somewhere narrower if you want to:
+Agents are ordinary application classes, so the scan follows `source_paths` by default. Point it somewhere narrower, or switch the pass off entirely, with its own config section:
 
 ```php
 // config/laravel-brain.php
 'ai' => [
+    'enabled' => env('LARAVEL_BRAIN_AI_ENABLED', true),
     'paths' => ['app-modules/*/src'],
 ],
 ```
+
+`enabled` is a second, independent switch: it answers "this application uses the SDK and I still do not want it on the graph", which the string prefilter above cannot. Turning it off skips the pass before the directory scan, so nothing is read and nothing is parsed.
 
 ## Graph Node Types
 

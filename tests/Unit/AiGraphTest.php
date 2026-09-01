@@ -112,6 +112,25 @@ it('wires the controller action that prompts an agent', function () {
     );
 });
 
+it('leaves the graph untouched when the feature is switched off', function () {
+    $root = fixture('laravel-ai-project');
+
+    $routes = (new RouteAnalyzer)->analyze($root);
+    $controllers = (new ControllerAnalyzer)->analyze($root, $routes);
+    $traces = (new MethodTracer)->trace($controllers, [], $root);
+
+    $builder = new GraphBuilder;
+    $builder->setSourcePaths(['app']);
+    $graph = $builder->build('ai-off', $routes, new MiddlewareRegistry([], [], []), $controllers, $traces, [], $root);
+    $before = $graph->nodeCount();
+
+    $ai = (new AiAnalyzer(['app'], enabled: false))->analyze($root);
+    $builder->addAi($ai['agents'], $ai['tools'], $ai['callSites']);
+
+    expect($graph->nodeCount())->toBe($before);
+    expect(array_filter($graph->nodes(), fn ($n): bool => str_starts_with($n->type, 'ai_')))->toBe([]);
+});
+
 it('leaves the graph untouched for a project that does not use the SDK', function () {
     $root = fixture('laravel-project');
 
