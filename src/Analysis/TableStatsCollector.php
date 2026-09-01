@@ -30,6 +30,12 @@ use Throwable;
  *
  * ## Nothing here may break a scan
  *
+ * Listing the tables at all needs `Schema::getTables()`, which arrived in Laravel 10 — Laravel 9
+ * offers only `getAllTables()`, whose shape differs per driver and which reports no size. Rather
+ * than reimplement per-driver table discovery for a release that is out of support, the collector
+ * reports nothing there. That is asked as a question up front, so "this framework cannot do it"
+ * stays distinguishable from "this database failed".
+ *
  * Reading a live database is a new kind of dependency for a static analyzer, and the ways it can
  * fail are all ordinary: no connection configured, credentials that cannot read `pg_class`, a
  * schema that holds none of the application's tables, a driver nobody here anticipated. Every one
@@ -59,12 +65,27 @@ class TableStatsCollector
     }
 
     /**
+     * Whether this framework version can list the connection's tables.
+     *
+     * `Schema::getTables()` is the whole foundation here; Laravel 9 has `getAllTables()` instead,
+     * with a different return shape per driver and no size in it.
+     */
+    public static function supportsTableListing(Connection $connection): bool
+    {
+        return method_exists($connection->getSchemaBuilder(), 'getTables');
+    }
+
+    /**
      * Statistics for every table on the connection, keyed by table name.
      *
      * @return array<string, TableStats>
      */
     public function collect(): array
     {
+        if (! self::supportsTableListing($this->connection)) {
+            return [];
+        }
+
         try {
             $totals = $this->totalSizes();
             $extras = $this->extras($this->connection);

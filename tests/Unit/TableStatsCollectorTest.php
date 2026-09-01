@@ -32,7 +32,10 @@ it('reports a total size for every table the connection holds', function () {
     expect($stats)->toHaveKey('widgets')
         ->and($stats['widgets'])->toBeInstanceOf(TableStats::class)
         ->and($stats['widgets']->table)->toBe('widgets');
-});
+})->skip(
+    fn (): bool => ! TableStatsCollector::supportsTableListing(bootTableStatsDatabase()->getConnection()),
+    'Laravel 9 has getAllTables() rather than getTables(), so there is nothing to measure there.',
+);
 
 it('leaves a figure the driver cannot answer for as null rather than zero', function () {
     // SQLite reports a size and nothing else: no row estimate short of counting, and no split
@@ -43,7 +46,10 @@ it('leaves a figure the driver cannot answer for as null rather than zero', func
 
     expect($stats['widgets']->rows)->toBeNull()
         ->and($stats['widgets']->indexBytes)->toBeNull();
-});
+})->skip(
+    fn (): bool => ! TableStatsCollector::supportsTableListing(bootTableStatsDatabase()->getConnection()),
+    'Laravel 9 has getAllTables() rather than getTables(), so there is nothing to measure there.',
+);
 
 it('hands back no collector at all when the connection cannot be resolved', function () {
     // The ordinary case for a CI run, and the one that must not stop a scan. Without a container
