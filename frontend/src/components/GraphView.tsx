@@ -1156,10 +1156,11 @@ export function GraphView({
           {/* Transaction regions, under the edges and the cards: a boundary is context, and
               context that draws over the thing it describes stops being context.
 
-              Members are ALWAYS outlined and the hull is an addition, never a replacement. The
-              hull can only be drawn when it encloses nothing that was not in the span, so tying
-              membership to it would make membership flicker — drag a node far enough and the
-              only mark saying "this was in a transaction" would vanish with the shape. */}
+              Exactly one of the two marks is drawn at a time. The hull says it best when it can
+              be drawn at all — it can only be, when it encloses nothing that was not in the span
+              — and outlining the members underneath it would say the same thing twice. When the
+              hull cannot be drawn, the outlines carry membership on their own, and the name moves
+              onto them for the same reason. */}
           {showTransactions && transactionAreas.map((region) => {
             const stroke = region.kind === 'rollback' ? ROLLBACK_FRAME : TRANSACTION_FRAME
             const dash = region.kind === 'rollback' ? '2 4' : '6 5'
@@ -1175,7 +1176,7 @@ export function GraphView({
                   />
                 )}
 
-                {region.members.map((m) => (
+                {!region.pure && region.members.map((m) => (
                   <rect key={m.id}
                     x={m.x - m.width / 2 - 5} y={m.y - m.height / 2 - 5}
                     width={m.width + 10} height={m.height + 10} rx={13}
