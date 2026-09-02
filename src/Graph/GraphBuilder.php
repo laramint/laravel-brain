@@ -664,6 +664,7 @@ class GraphBuilder
             'view' => $this->viewNodeId($fqcn),
             'interface' => $method !== '' ? $this->nodeIdForHop($fqcn, $method) : $this->interfaceNodeId($fqcn),
             'trait' => $this->traitNodeId($fqcn),
+            'event' => $this->eventId($fqcn),
             default => $this->nodeIdForHop($fqcn, $method),
         };
         if ($this->graph->hasNode($id)) {
@@ -811,7 +812,10 @@ class GraphBuilder
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
                 $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
-                $this->graph->addNode(new Node($id, 'event', $method ? "{$short}@{$method}" : $short, [
+                // Named for the class, never `Event@__construct`: the id no longer separates one
+                // method from another, so a label naming one would claim a distinction the node
+                // does not make.
+                $this->graph->addNode(new Node($id, 'event', $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'file' => $file,
@@ -1106,6 +1110,11 @@ class GraphBuilder
             'view' => $this->viewNodeId($edge->calleeFqcn),
             'interface' => $this->nodeIdForHop($edge->calleeFqcn, $edge->calleeMethod),
             'trait' => $this->traitNodeId($edge->calleeFqcn),
+            // The event a chain dispatches is the same event its listeners hang off, so it must
+            // resolve to the one canonical id. Left as `Fqcn::__construct`, the dispatch put a
+            // second node on the tab and the listeners stayed on the first one — reachable from
+            // the full graph and from no route tab at all.
+            'event' => $this->eventId($edge->calleeFqcn),
             default => $this->nodeIdForHop($edge->calleeFqcn, $edge->calleeMethod),
         };
     }
