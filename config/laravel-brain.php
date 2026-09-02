@@ -389,6 +389,32 @@ return [
         ],
     ],
 
+    // -------------------------------------------------------------------------
+    // Macros
+    // -------------------------------------------------------------------------
+    // Methods the application adds to classes that do not declare them, through
+    // Macroable::macro() or ::mixin(). A macro is invisible by construction:
+    // `$table->money()` resolves to nothing in Blueprint, and reading that class
+    // never explains where the method came from.
+    //
+    // Detection keys on the call, not on the receiver's traits — Filament ships
+    // its own Macroable, so a check for Illuminate's would silently drop every
+    // Filament component macro.
+    //
+    // Where a method is DEFINED is what this shows. Who calls it is not inferred:
+    // that would mean proving `$table` is a Blueprint, and call sites live in
+    // migrations this scan does not read.
+    //
+    // Override via the LARAVEL_BRAIN_MACROS_ENABLED env variable.
+    //
+    'macros' => [
+        'enabled' => env('LARAVEL_BRAIN_MACROS_ENABLED', true),
+
+        'paths' => [
+            'app',
+        ],
+    ],
+
     'observers' => [
         'model_paths' => [
             'app/Models',

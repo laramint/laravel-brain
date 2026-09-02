@@ -42,6 +42,8 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   entry_point_group: 'Entry groups',
   unreached_class: 'Not reached',
   unreached_group: 'Unreached groups',
+  macro: 'Macros',
+  macro_group: 'Macro receivers',
 }
 
 // Stable order matching App.tsx ALL_TYPES
@@ -53,6 +55,7 @@ const ORDER: GraphNode['type'][] = [
   'filament_panel', 'filament_resource', 'filament_page',
   'filament_page_method', 'filament_widget', 'filament_relation_manager',
   'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
+  'macro', 'macro_group',
 ]
 
 /**

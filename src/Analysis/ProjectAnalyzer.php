@@ -78,6 +78,7 @@ class ProjectAnalyzer
     private ObserverAnalyzer $observerAnalyzer;
 
     private ?BroadcastAnalyzer $broadcastAnalyzer = null;
+    private ?MacroAnalyzer $macroAnalyzer = null;
 
     private PolicyAnalyzer $policyAnalyzer;
 
@@ -178,6 +179,11 @@ class ProjectAnalyzer
             $this->broadcastAnalyzer = new BroadcastAnalyzer(
                 is_array($broadcastPaths) ? $broadcastPaths : [],
             );
+        }
+
+        if ((bool) config('laravel-brain.macros.enabled', true)) {
+            $macroPaths = config('laravel-brain.macros.paths', ['app']);
+            $this->macroAnalyzer = new MacroAnalyzer(is_array($macroPaths) ? $macroPaths : []);
         }
 
         $policyProviderPaths = config('laravel-brain.policies.provider_paths', ['app/Providers']);
@@ -691,6 +697,9 @@ class ProjectAnalyzer
         $this->graphBuilder->addChannels($channels, $channelEdges);
         if ($this->broadcastAnalyzer !== null) {
             $this->graphBuilder->addBroadcasts($this->broadcastAnalyzer->analyze($projectRoot), $channels);
+        }
+        if ($this->macroAnalyzer !== null) {
+            $this->graphBuilder->addMacros($this->macroAnalyzer->analyze($projectRoot));
         }
         $this->graphBuilder->addObservers($observerMap);
         $this->graphBuilder->addPolicies($policyMap);

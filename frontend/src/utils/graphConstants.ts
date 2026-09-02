@@ -55,6 +55,10 @@ export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 
 export const ACCENT_COLORS: Record<string, string> = {
+  // Amber: a macro is a method that is there without being written down, and the palette says
+  // 'look again' rather than 'something is wrong'.
+  macro:       '#F59E0B',
+  macro_group: '#B45309',
   route:      '#4CAF50',
   middleware: '#FF9800',
   controller: '#2196F3',
@@ -97,6 +101,8 @@ export const ACCENT_COLORS: Record<string, string> = {
 
 /** Darkened accent colours for text / icons on light card backgrounds */
 export const ACCENT_COLORS_LIGHT: Record<string, string> = {
+  macro:       '#B45309',
+  macro_group: '#92400E',
   route:      '#2e7d32',
   middleware: '#e65100',
   controller: '#1565c0',

@@ -29,6 +29,8 @@ const NODE_TYPES = [
   { type: 'unreached_class',           label: 'Not reached',       color: '#94A3B8' },
   { type: 'entry_point_group',         label: 'Entry group',       color: '#0E7490' },
   { type: 'unreached_group',           label: 'Unreached group',   color: '#475569' },
+  { type: 'macro',                     label: 'Macro',             color: '#F59E0B' },
+  { type: 'macro_group',               label: 'Macro receiver',    color: '#B45309' },
 ]
 
 export function Legend() {

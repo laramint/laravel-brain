@@ -23,6 +23,8 @@ const ALL_TYPES: GraphNode['type'][] = [
   // `edgeVisible` reads it too — a type left out has no visible edges, so folding a group
   // finds no children to fold.
   'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
+  // Membership here is what makes a type filterable at all, and edgeVisible reads it too.
+  'macro', 'macro_group',
 ]
 
 /**
