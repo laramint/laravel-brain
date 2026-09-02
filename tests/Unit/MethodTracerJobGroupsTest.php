@@ -102,7 +102,7 @@ it('keeps the readable jobs of a chain and flags the method as dispatching an un
     traceShipments($tracer, 'chainWithAnEntryNobodyCanRead');
 
     expect(groupsOf($tracer))->toBe([
-        'App\Services\ShipmentDispatcher::chainWithAnEntryNobodyCanRead#chain0' => ['App\Jobs\NotifyWarehouse'],
+        'App\Services\ShipmentDispatcher::chainWithAnEntryNobodyCanRead#chain0' => ['', 'App\Jobs\NotifyWarehouse'],
     ]);
 
     expect($tracer->unresolvedDispatchers())

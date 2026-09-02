@@ -138,6 +138,26 @@ it('counts the place of a chain member the graph does not hold, so the rest keep
     expect(regionsOfJob($graph, 'NotifyWarehouse')['chain']['position'])->toBe(2);
 });
 
+it('counts the place of a chain entry it could not name, end to end', function () {
+    // The sibling of the test above, and the case that was wrong: there the member is filtered
+    // out of the tab, here it could never be named at all. Both must leave the survivors saying
+    // which position they actually run in — the whole point of drawing a chain as a sequence.
+    $root = fixture('job-groups-project');
+    $tracer = new MethodTracer;
+    // Only this method. Tracing a second chain alongside it would put NotifyWarehouse at
+    // position 1 of THAT group too, and the assertion would pass with the placeholder removed.
+    $edges = $tracer->traceMethod('App\Services\ShipmentDispatcher', 'chainWithAnEntryNobodyCanRead', ['App\\' => [$root.'/app']], $root);
+
+    $builder = new GraphBuilder;
+    $builder->setJobGroups($tracer->jobGroups);
+
+    $graph = $builder->build('test', [], new MiddlewareRegistry([], [], []), [], $edges, []);
+    $builder->stampJobGroupRegions();
+
+    // `Bus::chain([$job, new NotifyWarehouse])` — the survivor is the SECOND job in that chain.
+    expect(regionsOfJob($graph, 'NotifyWarehouse')['chain']['position'])->toBe(1);
+});
+
 it('does not stamp a region twice when the same group is stamped again', function () {
     $graph = shipmentGraph('chainThroughTheFacade', $builder);
     $builder->stampJobGroupRegions();

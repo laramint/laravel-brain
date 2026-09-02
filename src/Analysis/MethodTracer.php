@@ -488,8 +488,14 @@ class MethodTracer
                 $jobs = [];
 
                 foreach ($group->jobs() as $position => $class) {
-                    $fqcn = $this->useMap[$class] ?? $class;
+                    $fqcn = $class === '' ? '' : ($this->useMap[$class] ?? $class);
                     $jobs[] = $fqcn;
+
+                    // The placeholder holds a position in the group; it names no class, so it
+                    // gets no hop and no node.
+                    if ($fqcn === '') {
+                        continue;
+                    }
 
                     if ($position === 0 && $group->headDispatchesItself) {
                         continue;
@@ -632,6 +638,10 @@ class MethodTracer
                     ['jobs' => $jobClasses, 'unresolved' => $unresolved] = JobGroups::jobsInArray($node->args[0] ?? null);
 
                     foreach ($jobClasses as $jobClass) {
+                        if ($jobClass === '') {
+                            continue;
+                        }
+
                         $this->hops[] = [
                             'fqcn' => $this->useMap[$jobClass] ?? $jobClass,
                             'method' => 'handle',

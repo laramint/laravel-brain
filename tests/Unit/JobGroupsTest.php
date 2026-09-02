@@ -63,7 +63,9 @@ it('takes the head of a facade dispatch from its argument, not from the facade',
 it('reports a chain holding an entry it cannot name, and keeps the ones it can', function () {
     $group = groupIn('        Bus::chain([$job, new NotifyWarehouse]);');
 
-    expect($group?->jobs())->toBe(['NotifyWarehouse']);
+    // The unreadable entry keeps its place as an empty string. Closing the gap instead would
+    // hand NotifyWarehouse position 0 and have the graph say it runs first, when it runs second.
+    expect($group?->jobs())->toBe(['', 'NotifyWarehouse']);
     expect($group?->unresolved)->toBeTrue();
 });
 

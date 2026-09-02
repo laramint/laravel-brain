@@ -196,6 +196,11 @@ final class JobGroups
 
             if ($class === null) {
                 $unresolved = true;
+                // Its place is kept, not its name. Dropping the entry closes the gap, and the
+                // job after it then reports the position of the one nobody could read — the
+                // graph would say NotifyWarehouse runs first in `chain([$job, new Notify…])`
+                // when it runs second. Consumers skip the empty string.
+                $jobs[] = '';
 
                 continue;
             }
