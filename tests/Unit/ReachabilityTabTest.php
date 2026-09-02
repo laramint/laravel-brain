@@ -117,7 +117,9 @@ it('surfaces the tab under its own sidebar category', function () {
 });
 
 it('reports a real project end to end', function () {
-    bootBrainConfig();
+    // Stated rather than assumed: the pass now ships off, so a test about what it reports has
+    // to turn it on.
+    bootBrainConfig(['reachability' => ['enabled' => true]]);
 
     $result = (new ProjectAnalyzer)->analyze(fixture('reachability-project'), function () {});
     $report = $result->reachability;

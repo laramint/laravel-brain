@@ -648,7 +648,18 @@ return [
     // Override via the LARAVEL_BRAIN_REACHABILITY_ENABLED env variable.
     //
     'reachability' => [
-        'enabled' => env('LARAVEL_BRAIN_REACHABILITY_ENABLED', true),
+        // Off by default, which is the one setting here that is a judgement rather than a
+        // fact. The pass opens every declared class, and what that costs depends entirely on
+        // how much of the codebase the rest of the scan already parsed:
+        //
+        //   application A   build parses 746 files, inventory 4,416   scan ×3.0
+        //   application B   7,546 source files, nearly all already parsed   +2% (within noise)
+        //
+        // So the worst case is real and the typical case may be nothing. What does not vary is
+        // the shape of the answer: on a large modular application 79-90% of declared classes
+        // come back unreached, and a list that long is read once and then ignored. Turn it on
+        // when you are hunting for what nothing reaches; leave it off for a scan you run often.
+        'enabled' => env('LARAVEL_BRAIN_REACHABILITY_ENABLED', false),
     ],
 
     // -------------------------------------------------------------------------

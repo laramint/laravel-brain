@@ -142,7 +142,7 @@ class ProjectAnalyzer
             ? $sourcePaths
             : SourceDirectories::DEFAULT_SOURCE_PATHS;
         $this->sourcePaths = $sourcePaths;
-        $this->reachabilityEnabled = (bool) config('laravel-brain.reachability.enabled', true);
+        $this->reachabilityEnabled = (bool) config('laravel-brain.reachability.enabled', false);
 
         $listenerPaths = config('laravel-brain.listeners.paths', ['app/Listeners']);
         $this->listenerPaths = is_array($listenerPaths) ? array_values($listenerPaths) : ['app/Listeners'];
