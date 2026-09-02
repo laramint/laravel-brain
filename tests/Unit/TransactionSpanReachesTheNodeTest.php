@@ -4,6 +4,7 @@ use LaraMint\LaravelBrain\Analysis\ControllerAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
+use LaraMint\LaravelBrain\Analysis\SourceDirectories;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
 
 /**
@@ -120,4 +121,23 @@ it('stamps that identity onto the node the builder makes', function () {
         expect($data['transactionId'] ?? null)
             ->not->toBeNull("node {$id} is marked as running in a transaction but names no span");
     }
+});
+
+it('reads no spans at all when the detector is switched off', function () {
+    // Off means the traversal never happens, not that its result is dropped: an application with
+    // no transactions was paying a walk of every method body to be told it has none.
+    $project = fixture('transaction-controller');
+    $routes = (new RouteAnalyzer)->analyze($project);
+    $controllers = new ControllerAnalyzer;
+    $definitions = $controllers->analyze($project, $routes);
+
+    $edges = (new MethodTracer([], SourceDirectories::DEFAULT_SOURCE_PATHS, false))
+        ->trace($definitions, $controllers->getPsr4Map(), $project);
+
+    $marked = array_filter($edges, static fn (object $edge): bool => $edge->inTransaction || $edge->inRollback);
+
+    // The chain is still traced — turning the boundary off must not take the work it drew around
+    // off the graph with it.
+    expect($edges)->not->toBeEmpty()
+        ->and($marked)->toBeEmpty();
 });

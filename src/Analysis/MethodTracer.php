@@ -89,9 +89,14 @@ class MethodTracer
      * @param  string[]  $extraDispatchHelpers
      * @param  string[]  $sourcePaths  class-file search roots, relative to the project root
      */
+    /**
+     * @param  bool  $detectTransactions  read transaction spans while scanning; off skips the
+     *                                    traversal entirely rather than discarding its result
+     */
     public function __construct(
         array $extraDispatchHelpers = [],
         array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS,
+        private readonly bool $detectTransactions = true,
     ) {
         $this->sourcePaths = $sourcePaths;
         $this->parser = new PhpFileParser;
@@ -380,7 +385,10 @@ class MethodTracer
 
         $dispatchFunctions = array_values(array_unique(['dispatch', 'dispatch_sync', ...$this->extraDispatchHelpers]));
 
-        $scopes = TransactionScopes::in($ast);
+        // Built, or not built at all. The detector walks every method body it is handed, and an
+        // application with no transactions pays that walk to be told it has none — measured at
+        // +36% of the lifecycle phase on a corpus that contains not one `DB::transaction`.
+        $scopes = $this->detectTransactions ? TransactionScopes::in($ast) : TransactionScopes::none();
 
         // The method that opens a span is part of it, and is the only part guaranteed to be
         // visible: a transaction whose body calls nothing the tracer can resolve would otherwise

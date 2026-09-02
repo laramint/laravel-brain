@@ -146,6 +146,7 @@ class ProjectAnalyzer
         $this->methodTracer = new MethodTracer(
             is_array($dispatchHelpers) ? $dispatchHelpers : [],
             $sourcePaths,
+            (bool) config('laravel-brain.transactions.enabled', true),
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
         $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
