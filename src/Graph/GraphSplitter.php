@@ -165,10 +165,36 @@ class GraphSplitter
         }
 
         // ── Broadcast channel tabs ────────────────────────────────────────────
+        //
+        // The events that broadcast onto a channel point AT it, and a tab grown forward from the
+        // channel walks away from them — so the one question a channel tab exists to answer,
+        // "what goes out on this", would be the one thing missing from it. They are added node by
+        // node rather than seeded: seeding them would grow each event's whole downstream subtree
+        // into a tab about a channel.
+        $broadcastersByChannel = [];
+
+        foreach ($fullGraph->edges() as $edge) {
+            if ($edge->type === 'event-to-channel') {
+                $broadcastersByChannel[$edge->target][] = $edge;
+            }
+        }
+
         foreach ($channels as $ch) {
             $tabId = $this->sanitizeId('channel '.$ch->name);
             $seedId = 'channel::'.md5($ch->name);
             $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, [$seedId], $projectName, $analyzedAt);
+
+            foreach ($broadcastersByChannel[$seedId] ?? [] as $edge) {
+                $source = $fullGraph->getNode($edge->source);
+
+                if ($source === null) {
+                    continue;
+                }
+
+                $subgraph->addNode($source);
+                $subgraph->addEdge($edge);
+            }
+
             $subgraphs[$tabId] = $subgraph;
 
             $manifest[] = new TabManifestEntry(

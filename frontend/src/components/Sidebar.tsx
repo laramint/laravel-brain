@@ -350,6 +350,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'deferredDefectMessage' &&
       key !== 'note' &&
       key !== 'unfollowableReferences' &&
+      key !== 'broadcast' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -359,6 +360,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const event = node.data?.event as import('../types/graph').EventNodeData | undefined
   const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
   const job = node.data?.job as import('../types/graph').JobNodeData | undefined
+  const broadcast = node.data?.broadcast as import('../types/graph').BroadcastData | undefined
 
   // The Reachability tab's caveat, rendered next to the class rather than left in a heading
   // three levels up the tree. A reader who clicks a class and is told only that nothing
@@ -1054,6 +1056,37 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       </ul>
                     </>
                   )}
+                </div>
+              )}
+
+              {broadcast && (
+                <div className="sidebar-section">
+                  <h3>Broadcasts</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">delivery</span>
+                    <span className="prop-value">{broadcast.queued ? 'queued' : 'immediately'}</span>
+                  </div>
+                  {broadcast.alias && (
+                    <div className="prop-row"><span className="prop-key">listen for</span><span className="prop-value">{broadcast.alias}</span></div>
+                  )}
+                  {broadcast.queue && (
+                    <div className="prop-row"><span className="prop-key">queue</span><span className="prop-value">{broadcast.queue}</span></div>
+                  )}
+                  {broadcast.conditional && (
+                    <div className="prop-row"><span className="prop-key">condition</span><span className="prop-value">broadcastWhen() decides</span></div>
+                  )}
+                  {broadcast.customPayload && (
+                    <div className="prop-row"><span className="prop-key">payload</span><span className="prop-value">broadcastWith(), not the public properties</span></div>
+                  )}
+                  {broadcast.channels.map((channel) => (
+                    <div className="prop-row" key={`${channel.kind}:${channel.name}`}>
+                      <span className="prop-key">{channel.kind}</span>
+                      <span className="prop-value">
+                        {channel.computed ? 'name decided at runtime' : channel.name}
+                        {!channel.computed && !channel.declared && ' — no channel route here names it'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
 
