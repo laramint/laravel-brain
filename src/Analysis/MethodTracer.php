@@ -249,6 +249,7 @@ class MethodTracer
                         visibility: $hop['visibility'],
                         inTransaction: $hop['inTransaction'] ?? false,
                         inRollback: $hop['inRollback'] ?? false,
+                        transactionId: $hop['transactionId'] ?? null,
                     );
 
                     // Recurse into non-leaf hops (services, repositories)
