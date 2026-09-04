@@ -251,4 +251,5 @@ it('names the morph alias on a model node in a route graph too', function () {
 
     expect($node($build(new MorphMap(['order' => 'App\\Models\\Order'])))->data['morphAlias'])->toBe('order')
         // No map, no key — a null would render as an empty row on every model in most projects.
-        ->and($node($build(null))->data)->not->toHaveKey('morphAlias');});
+        ->and($node($build(null))->data)->not->toHaveKey('morphAlias');
+});
