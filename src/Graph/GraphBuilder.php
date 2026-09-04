@@ -25,6 +25,7 @@ use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
 use LaraMint\LaravelBrain\Analysis\PhpStructureInspector;
 use LaraMint\LaravelBrain\Analysis\ProjectFileIndex;
+use LaraMint\LaravelBrain\Analysis\RelationAutoloading;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SourceDirectories;
@@ -127,7 +128,7 @@ class GraphBuilder
     public function __construct()
     {
         $this->graph = new Graph;
-        $this->flowExtractor = new FlowExtractor;
+        $this->flowExtractor = new FlowExtractor(RelationAutoloading::isEnabled());
         $this->parser = new PhpFileParser;
     }
 

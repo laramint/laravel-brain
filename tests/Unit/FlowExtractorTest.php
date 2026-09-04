@@ -7,7 +7,7 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitorAbstract;
 
 /** Flow steps for the first method of a class written inline. */
-function flowFor(string $body): array
+function flowFor(string $body, bool $relationsAutoloaded = false): array
 {
     $parsed = (new PhpFileParser)->parseCode(<<<PHP
         <?php
@@ -40,7 +40,7 @@ function flowFor(string $body): array
     });
     $traverser->traverse($parsed['ast'] ?? []);
 
-    return $found === null ? [] : (new FlowExtractor)->extract($found, $parsed['useMap'] ?? []);
+    return $found === null ? [] : (new FlowExtractor($relationsAutoloaded))->extract($found, $parsed['useMap'] ?? []);
 }
 
 it('shows the work inside a DB::transaction, not just the wrapper', function () {
@@ -165,4 +165,81 @@ it('stops descending into callbacks nested past any depth real code reaches', fu
         $cursor = $cursor[0]['body'];
     }
     expect($levels)->toBeLessThanOrEqual(32)->and($levels)->toBeGreaterThan(1);
+});
+
+it('flags a relation read off the value a loop is iterating', function () {
+    $steps = flowFor('        foreach ($orders as $order) {
+            $order->customer;
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeTrue();
+});
+
+it('follows the relation chain back to the loop value', function () {
+    $steps = flowFor('        foreach ($orders as $order) {
+            $order->customer->address;
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeTrue();
+});
+
+it('does not call an ordinary collaborator call in a loop a query', function () {
+    // `$this->service->handle()` reached the rule through the method-call chain, whose receiver
+    // is a property fetch. Measured on a real application, treating every property fetch as a
+    // query produced 28 of 33 markers — a pattern that appears in almost any loop.
+    $steps = flowFor('        foreach ($rows as $row) {
+            $this->releaseClaim->execute($row);
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeFalse();
+});
+
+it('does not flag reading a property of something the loop does not bind', function () {
+    $steps = flowFor('        foreach ($rows as $row) {
+            $this->config->timeout;
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeFalse();
+});
+
+it('still flags an explicit query in a loop, whatever it is called on', function () {
+    // Narrowing the relation rule must not lose the case that was never in doubt.
+    $steps = flowFor('        foreach ($ids as $id) {
+            $warehouse = \App\Models\Warehouse::query()->find($id);
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeTrue();
+});
+
+it('leaves a relation read alone when the application autoloads relations', function () {
+    // Model::automaticallyEagerLoadRelationships() batches the whole collection on first touch,
+    // so the per-iteration query the marker warns about does not happen.
+    $steps = flowFor('        foreach ($orders as $order) {
+            $order->customer;
+        }', relationsAutoloaded: true);
+
+    expect($steps[0]['n1'] ?? false)->toBeFalse();
+});
+
+it('still flags an explicit query even when relations are autoloaded', function () {
+    // Autoloading batches relation access. It does not batch a query somebody wrote out.
+    $steps = flowFor('        foreach ($ids as $id) {
+            \App\Models\Warehouse::query()->find($id);
+        }', relationsAutoloaded: true);
+
+    expect($steps[0]['n1'] ?? false)->toBeTrue();
+});
+
+it('forgets a loop variable once the loop has ended', function () {
+    // The extractor is reused across every method it charts, so a name left bound after its loop
+    // closes goes on flagging reads of that name — in the next loop, and in the next method.
+    $steps = flowFor('        foreach ($orders as $order) {
+            $order->customer;
+        }
+        foreach ($rows as $row) {
+            $order->customer;
+        }');
+
+    expect($steps[0]['n1'] ?? false)->toBeTrue()
+        ->and($steps[1]['n1'] ?? false)->toBeFalse();
 });
