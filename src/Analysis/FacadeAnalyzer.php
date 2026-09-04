@@ -77,15 +77,19 @@ final class FacadeAnalyzer
             false,
         );
 
-        // Round one: only files that name Facade at all. A facade reaches Illuminate's Facade
-        // through `extends`, and naming that class — imported, aliased or fully qualified —
-        // leaves the token behind.
+        // One read per file. The second pass used to throw the bytes away and open every
+        // remaining file again whenever a chain name turned up.
+        /** @var array<string, string> path => source, files not yet parsed */
         $pending = [];
         foreach ($files as $path) {
-            if ($this->mightDefineFacade($path)) {
+            $code = @file_get_contents($path);
+            if ($code === false) {
+                continue;
+            }
+            if ($this->codeMightDefineFacade($code)) {
                 $this->scanFile($path, $registry);
             } else {
-                $pending[] = $path;
+                $pending[$path] = $code;
             }
         }
 
@@ -103,11 +107,7 @@ final class FacadeAnalyzer
             $seen = array_merge($seen, $bases);
 
             $stillPending = [];
-            foreach ($pending as $path) {
-                $code = @file_get_contents($path);
-                if ($code === false) {
-                    continue;
-                }
+            foreach ($pending as $path => $code) {
                 $mentions = false;
                 foreach ($bases as $base) {
                     if (str_contains($code, $base)) {
@@ -118,7 +118,7 @@ final class FacadeAnalyzer
                 if ($mentions) {
                     $this->scanFile($path, $registry);
                 } else {
-                    $stillPending[] = $path;
+                    $stillPending[$path] = $code;
                 }
             }
             $pending = $stillPending;
@@ -134,21 +134,30 @@ final class FacadeAnalyzer
      *
      * Naming the class is the real test, but `Facade` on its own is not that test: the import
      * `use Illuminate\Support\Facades\Log;` contains it, and most files in a Laravel application
-     * carry a line like that. Dropping the framework's `Facades\` path segment first leaves the
-     * bare mention that only a file defining or extending a facade has — 22% of one application
-     * admitted down to 1%, and the base class itself survives, since
-     * `Illuminate\Support\Facades\Facade` still reads `Illuminate\Support\Facade` afterwards.
+     * carry a line like that. Skipping a `Facades\` match leaves the bare mention that only a
+     * file defining or extending a facade has — 22% of one application admitted down to 1%.
+     * The base class still matches: after skipping `Facades\` in
+     * `Illuminate\Support\Facades\Facade`, the trailing `Facade` remains.
      *
      * On its own this misses a facade that reaches the base through an app-level intermediate;
      * {@see analyze()} closes that with a second pass rather than assuming it away.
      */
-    private function mightDefineFacade(string $file): bool
+    private function codeMightDefineFacade(string $code): bool
     {
-        $code = @file_get_contents($file);
-
         // Case-sensitive, unlike the `extends` keyword this replaced: `Facade` is a class name,
         // and PHP class names are matched case-sensitively by the autoloader in practice.
-        return $code !== false && str_contains(str_replace('Facades\\', '', $code), 'Facade');
+        $offset = 0;
+        while (($p = strpos($code, 'Facade', $offset)) !== false) {
+            if (substr($code, $p, 8) === 'Facades\\') {
+                $offset = $p + 8;
+
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private function scanFile(string $file, FacadeRegistry $registry): void
