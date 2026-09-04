@@ -55,7 +55,8 @@ class FlowExtractor
 
     private bool $detectOutgoingHttp = true;
 
-    public function __construct(private readonly bool $relationsAutoloaded = false)    {
+    public function __construct(private readonly bool $relationsAutoloaded = false)
+    {
         $this->printer = new PrettyPrinter;
         $this->cacheDetector = new CacheOperationDetector;
         $this->useMap = [];
