@@ -610,9 +610,27 @@ class GraphBuilder
             $edgeType = 'action-to-'.$calleeGraphType;
 
             $this->addEdge($callerNode, $calleeNode, $edgeLabel, $edgeType);
+
+            // A transaction is a span, not a step, so it is recorded as something true OF the
+            // work rather than as a node in the path. The callee is what runs inside; the caller
+            // is what opened it and generally outlives it.
+            if ($edge->inTransaction || $edge->inRollback) {
+                $this->recordSpanState($calleeNode, $edge->transactionId, $edge->inTransaction, $edge->inRollback);
+            }
+
             $this->maybeWireContainerBinding($edge, $models);
             $this->maybeWireFacadeResolution($edge, $models);
         }
+
+        foreach (array_keys($this->transactionOpeners) as $key) {
+            [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
+            $nodeId = $this->nodeIdForHop($fqcn, $method);
+            // The opener belongs to the first span it opens, which is the one a reader sees it
+            // wrapped in when the method holds only one — the ordinary case.
+            $this->recordSpanState($nodeId, $key.'#0', inTransaction: true, inRollback: false);
+        }
+
+        $this->stampTransactionScopes();
 
         $this->supplementEnumAndInterfaceNodes($controllers, $callChain);
         $this->wireControllerInterfaceHints($routes, $controllers);
@@ -2202,6 +2220,87 @@ class GraphBuilder
         }
 
         return array_unique($resolved);
+    }
+
+    /**
+     * Methods that open a transaction, keyed `Fqcn::method`, as reported by the tracer.
+     *
+     * @var array<string, true>
+     */
+    private array $transactionOpeners = [];
+
+    /** @param array<string, true> $openers */
+    public function setTransactionOpeners(array $openers): void
+    {
+        $this->transactionOpeners = $openers;
+    }
+
+    /**
+     * Which span each node sits in, and what is true of the node WITHIN that span.
+     *
+     * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
+     * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
+     * which draws one.
+     *
+     * The three facts are kept together on purpose. A node can be reached from more than one
+     * span — a service called both inside a transaction and from a catch block that rolls one
+     * back — and recording them apart let the id come from the first span while the rollback
+     * flag came from any span at all. The node then drew inside region A wearing region B's
+     * marking: shown as a rollback member of a transaction it never rolled back.
+     *
+     * @var array<string, array{id: string|null, inTransaction: bool, inRollback: bool}>
+     */
+    private array $spanStateByNode = [];
+
+    /**
+     * Bind a node to the first span that reached it, flags and identity together.
+     *
+     * First one wins, which is what the identity did before this and is the honest choice while
+     * a node carries one region: a later span cannot be shown, so silently replacing the earlier
+     * one would only change which of two answers is hidden.
+     */
+    private function recordSpanState(string $nodeId, ?string $spanId, bool $inTransaction, bool $inRollback): void
+    {
+        $this->spanStateByNode[$nodeId] ??= [
+            'id' => $spanId,
+            'inTransaction' => $inTransaction,
+            'inRollback' => $inRollback,
+        ];
+    }
+
+    /**
+     * Write the two flags onto the nodes that earned them.
+     *
+     * Done in one pass after the chain is walked rather than as each edge is seen, because a
+     * node can be reached by several calls and the last write would otherwise decide: one call
+     * from inside a transaction is enough to make the flag true, and a later call from outside
+     * must not clear it.
+     */
+    private function stampTransactionScopes(): void
+    {
+        foreach ($this->spanStateByNode as $id => $state) {
+            $node = $this->graph->getNode($id);
+
+            if ($node === null) {
+                continue;
+            }
+
+            $data = $node->data;
+
+            if ($state['inTransaction']) {
+                $data['inTransaction'] = true;
+            }
+
+            if ($state['inRollback']) {
+                $data['inRollback'] = true;
+            }
+
+            if ($state['id'] !== null) {
+                $data['transactionId'] = $state['id'];
+            }
+
+            $this->graph->updateNodeData($id, $data);
+        }
     }
 
     private function addEdge(string $source, string $target, string $label, string $type): void

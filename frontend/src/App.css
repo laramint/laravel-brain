@@ -4007,3 +4007,15 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   font-size: 12px;
   padding: 4px 6px;
 }
+
+/* ── Transaction in the canvas legend ───────────────────────────────────────
+   A hollow, dashed dot rather than a filled one: every other crumb is a kind of
+   node and this is a boundary drawn around them, and the marker should say so
+   before the word does. */
+.g-crumb--aside { opacity: 0.9; }
+.g-crumb-sep { opacity: 0.45; margin-right: 8px; }
+.g-crumb-dot--dashed {
+  background: transparent !important;
+  border: 1.5px dashed currentColor;
+  border-color: inherit;
+}
