@@ -1,0 +1,83 @@
+name: Pull request template
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+# The workflow reads only PR metadata. These permissions let it leave one
+# actionable comment and close a malformed PR, including contributions from forks.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  require-complete-template:
+    name: Require a complete pull request template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+
+            const section = (start, end) => {
+              const expression = new RegExp(`^## ${start}\\s*$([\\s\\S]*?)(?=^## ${end}\\s*$|$)`, 'mi');
+              return (body.match(expression)?.[1] || '')
+                .replace(/<!--[\s\S]*?-->/g, '')
+                .trim();
+            };
+
+            const meaningfulText = (value) => value
+              .replace(/^Closes\s+#?\s*$/gmi, '')
+              .replace(/^[-*]\s*$/gm, '')
+              .replace(/^\d+\.\s*$/gm, '')
+              .replace(/`[^`]*`/g, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            const problems = [];
+            if (meaningfulText(section('Why', 'What changed')).length < 12) {
+              problems.push('**Why** needs a short description of the problem and intended outcome.');
+            }
+
+            if (meaningfulText(section('What changed', 'Architecture impact')).length < 12) {
+              problems.push('**What changed** needs a meaningful reviewer-facing summary.');
+            }
+
+            if (meaningfulText(section('Manual verification', 'UI and documentation')).length < 12) {
+              problems.push('**Manual verification** needs at least one completed step and result.');
+            }
+
+            const automatedChecks = section('Automated checks', 'Manual verification');
+            if (!/- \[x\]/i.test(automatedChecks)) {
+              problems.push('Select at least one completed item under **Automated checks**.');
+            }
+
+            if (!/- \[x\] I have completed the required sections,/i.test(body)) {
+              problems.push('Tick **Contributor confirmation** after reviewing the PR.');
+            }
+
+            if (problems.length === 0) {
+              core.notice('Pull request template is complete.');
+              return;
+            }
+
+            const marker = '<!-- laravel-brain-pr-template-validator -->';
+            const comment = `${marker}\n## Pull request closed: template incomplete\n\nPlease complete the following items, then reopen this pull request:\n\n${problems.map((problem) => `- ${problem}`).join('\n')}\n\nThis check validates the PR description only. CI must still pass before review.`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            if (!existing.some((item) => item.user?.type === 'Bot' && item.body?.includes(marker))) {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: comment });
+            }
+
+            await github.rest.pulls.update({ owner, repo, pull_number: issue_number, state: 'closed' });
+            core.setFailed('Pull request closed because required template fields are incomplete.');
