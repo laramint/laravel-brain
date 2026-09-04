@@ -22,12 +22,26 @@ class BrainController extends Controller
     public function source(Request $request): JsonResponse
     {
         $filePath = $request->query('path', '');
+        $real = $filePath ? realpath($filePath) : false;
 
-        if (! $filePath || ! file_exists($filePath) || pathinfo($filePath, PATHINFO_EXTENSION) !== 'php') {
+        if (! $real || ! is_file($real) || pathinfo($real, PATHINFO_EXTENSION) !== 'php' || ! self::isWithinProjectRoot($real, base_path())) {
             return response()->json(['error' => 'File not found'], 404);
         }
 
-        return response()->json(['content' => file_get_contents($filePath)]);
+        return response()->json(['content' => file_get_contents($real)]);
+    }
+
+    /**
+     * Confines "show me this file" to the project a scan actually covers. Node paths come
+     * from the scan itself, but this endpoint takes a path straight from the query string,
+     * and reading outside the tree is not a mistake worth being able to make — the same
+     * reasoning that already guards {@see ContextExporter::readSource()}.
+     */
+    public static function isWithinProjectRoot(string $realPath, string $projectRoot): bool
+    {
+        $root = realpath($projectRoot);
+
+        return $root !== false && str_starts_with($realPath, $root.DIRECTORY_SEPARATOR);
     }
 
     // ── Scan ──────────────────────────────────────────────────────────────────
