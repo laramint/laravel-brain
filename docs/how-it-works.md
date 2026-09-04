@@ -61,7 +61,7 @@ Regular vendor dependencies are deliberately left out of that map, so the call-c
 
 A command is recognised however it names itself: a `$signature` (or the older `$name`) property, Laravel's `#[Signature]` / `#[Description]` attributes, or Symfony's `#[AsCommand]`. A property wins over an attribute, matching Laravel's own precedence.
 
-Scheduled tasks are read from `routes/console.php` and from a schedule split into its own `routes/schedule.php`, in both the `Schedule::command()` and `$schedule->command()` spellings, along with `job()` and `call()` entries and the cadence each one is chained with.
+Scheduled tasks are read from `routes/console.php`, from a schedule split into its own `routes/schedule.php`, from the legacy `Console\Kernel::schedule()` method, and from the `->withSchedule(…)` closure a Laravel 11+ `bootstrap/app.php` uses instead — in both the `Schedule::command()` and `$schedule->command()` spellings, along with `job()` and `call()` entries. Each task keeps the cadence it was chained with *and the arguments that cadence was given* (`dailyAt('05:30')`, `cron('0 3 * * *')`), its timezone, and the guards that decide whether it fires at all (`withoutOverlapping()`, `onOneServer()`, `runInBackground()`, `evenInMaintenanceMode()`). Every task gets its own entry in the sidebar's Schedules bucket, showing what runs and when without opening it.
 
 ## Broadcast channels
 

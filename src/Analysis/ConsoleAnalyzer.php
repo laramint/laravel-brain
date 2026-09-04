@@ -22,24 +22,178 @@ class ConsoleCommandDefinition
 
 class ScheduleEntry
 {
+    /**
+     * @param  string[]  $frequencyArguments  Literal arguments of the cadence call — ['05:30'] for dailyAt('05:30').
+     * @param  string[]  $modifiers  Guard methods on the chain: withoutOverlapping, onOneServer, …
+     */
     public function __construct(
         public string $type,        // 'command' | 'job' | 'call'
         public string $target,      // command signature or job FQCN
         public string $frequency,   // 'daily' | 'hourly' | etc.
         public string $file,
+        public array $frequencyArguments = [],
+        public array $modifiers = [],
+        public string $timezone = '',
+        /**
+         * What a `Schedule::call(fn)` actually does.
+         *
+         * A closure task has no class to link to, so without this its tab is one node and
+         * nothing else — the only kind of scheduled work the viewer could say nothing about.
+         * The steps are read where the closure is already in hand rather than by re-parsing the
+         * file at a remembered line.
+         *
+         * @var array<int, array<string, mixed>>
+         */
+        public array $flowSteps = [],
+        /**
+         * The closure a `call()` task runs, kept so the tracer can descend from it.
+         *
+         * A closure route already carries its node for exactly this reason. Without it the only
+         * scheduled work with no class behind it is also the only one whose calls never become
+         * nodes, so its tab holds the task and nothing it sets off.
+         */
+        public Node\Expr\Closure|Node\Expr\ArrowFunction|null $closureNode = null,
+        /** @var array<string, string> */
+        public array $closureUseMap = [],
     ) {}
+
+    /**
+     * @param  array<int, array<string, mixed>>  $flowSteps
+     */
+    /**
+     * @param  array<int, array<string, mixed>>  $flowSteps
+     * @param  array<string, string>  $closureUseMap
+     */
+    public static function fromChain(
+        string $type,
+        string $target,
+        string $file,
+        ScheduleChain $chain,
+        array $flowSteps = [],
+        Node\Expr\Closure|Node\Expr\ArrowFunction|null $closureNode = null,
+        array $closureUseMap = [],
+    ): self {
+        return new self(
+            type: $type,
+            target: $target,
+            frequency: $chain->frequency,
+            file: $file,
+            frequencyArguments: $chain->frequencyArguments,
+            modifiers: $chain->modifiers,
+            timezone: $chain->timezone,
+            flowSteps: $flowSteps,
+            closureNode: $closureNode,
+            closureUseMap: $closureUseMap,
+        );
+    }
+
+    /**
+     * Id of the graph node this entry produces.
+     *
+     * Lives here because the builder that creates the node and the splitter that seeds a tab
+     * from it both need it, and they used to spell the same hash out separately — so widening
+     * the hash in one place silently detached the tab from its own node.
+     *
+     * The cadence arguments are part of the hash: the same command scheduled at 05:00 and at
+     * 17:00 is two tasks, and hashing the method name alone collapsed them into one.
+     */
+    public function nodeId(): string
+    {
+        return 'schedule::'.md5($this->type.$this->target.$this->frequency.implode(',', $this->frequencyArguments));
+    }
+
+    /**
+     * When it runs, in the shortest form that is still unambiguous: the raw expression for
+     * `cron('0 3 * * *')`, "dailyAt 05:30" for a cadence that took arguments, the bare method
+     * name otherwise. Empty when the chain never states one.
+     */
+    public function cadence(): string
+    {
+        if ($this->frequency === '') {
+            return '';
+        }
+
+        if ($this->frequency === 'cron') {
+            return $this->frequencyArguments[0] ?? 'cron';
+        }
+
+        if ($this->frequencyArguments === []) {
+            return $this->frequency;
+        }
+
+        return $this->frequency.' '.implode(', ', $this->frequencyArguments);
+    }
 }
 
 class ConsoleAnalyzer
 {
-    /** @var string[] Schedule methods that state a cadence. */
+    /**
+     * The steps inside a `Schedule::call(fn)`, read from the closure the registration was given.
+     *
+     * Shared by both visitors — the Schedule facade form and the kernel form — because a closure
+     * task is the one kind of scheduled work with no class behind it, and without this its tab
+     * shows a single node and nothing about what runs every minute.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function closureFlowSteps(?Node\Arg $arg): array
+    {
+        $closure = self::closureArgument($arg);
+
+        return $closure === null ? [] : (new FlowExtractor)->extractFromClosure($closure);
+    }
+
+    /** The closure a registration was handed, or null when it was handed anything else. */
+    public static function closureArgument(?Node\Arg $arg): Node\Expr\Closure|Node\Expr\ArrowFunction|null
+    {
+        $closure = $arg?->value;
+
+        return $closure instanceof Node\Expr\Closure || $closure instanceof Node\Expr\ArrowFunction
+            ? $closure
+            : null;
+    }
+
+    /**
+     * Schedule methods that state a cadence.
+     *
+     * `timezone` used to be on this list and is not a cadence — it qualifies one. It was read
+     * off the chain first, so `->daily()->timezone('Europe/Warsaw')` was recorded as running
+     * on a frequency of "timezone"; it is read into its own field now.
+     *
+     * @var string[]
+     */
     public const FREQUENCY_METHODS = [
-        'everyMinute', 'everyTwoMinutes', 'everyThreeMinutes', 'everyFiveMinutes',
-        'everyTenMinutes', 'everyFifteenMinutes', 'everyThirtyMinutes', 'hourly',
-        'hourlyAt', 'daily', 'dailyAt', 'twiceDaily', 'weekly', 'weeklyOn',
-        'monthly', 'monthlyOn', 'twiceMonthly', 'lastDayOfMonth', 'quarterly',
-        'yearly', 'cron', 'timezone',
+        'everySecond', 'everyTwoSeconds', 'everyFiveSeconds', 'everyTenSeconds',
+        'everyFifteenSeconds', 'everyTwentySeconds', 'everyThirtySeconds',
+        'everyMinute', 'everyTwoMinutes', 'everyThreeMinutes', 'everyFourMinutes',
+        'everyFiveMinutes', 'everyTenMinutes', 'everyFifteenMinutes', 'everyThirtyMinutes',
+        'hourly', 'hourlyAt', 'everyOddHour', 'everyTwoHours', 'everyThreeHours',
+        'everyFourHours', 'everySixHours', 'daily', 'dailyAt', 'twiceDaily', 'twiceDailyAt',
+        'weekly', 'weeklyOn', 'monthly', 'monthlyOn', 'twiceMonthly', 'lastDayOfMonth',
+        'quarterly', 'quarterlyOn', 'yearly', 'yearlyOn', 'cron',
     ];
+
+    /**
+     * Chained guards that change whether — or where — a due task actually runs. They answer
+     * the second half of "what fires at 3am": a task guarded by `withoutOverlapping()` may
+     * not fire at all, and one without `onOneServer()` fires on every box in the fleet.
+     *
+     * @var string[]
+     */
+    public const MODIFIER_METHODS = [
+        'withoutOverlapping', 'onOneServer', 'runInBackground', 'evenInMaintenanceMode',
+    ];
+
+    /**
+     * Files that hold a scheduling closure or method.
+     *
+     * bootstrap/app.php is where Laravel 11 moved `->withSchedule(…)`, and a skeleton from
+     * that generation has no Console Kernel at all — scanning only the legacy path found no
+     * schedule in it whatsoever.
+     *
+     * @var string[]
+     */
+    public const DEFAULT_KERNEL_PATHS = ['app/Console/Kernel.php', 'bootstrap/app.php'];
 
     private PhpFileParser $parser;
 
@@ -60,12 +214,12 @@ class ConsoleAnalyzer
     public function __construct(
         array $consoleRoutePaths = ['routes/*/*.php'],
         array $classPaths = ['app/Console/Commands/*/*.php'],
-        array $kernelPaths = ['app/Console/Kernel.php'],
+        array $kernelPaths = self::DEFAULT_KERNEL_PATHS,
     ) {
         $this->parser = new PhpFileParser;
         $this->consoleRoutePaths = $consoleRoutePaths ?: ['routes/*/*.php'];
         $this->classPaths = $classPaths ?: ['app/Console/Commands/*/*.php'];
-        $this->kernelPaths = $kernelPaths ?: ['app/Console/Kernel.php'];
+        $this->kernelPaths = $kernelPaths ?: self::DEFAULT_KERNEL_PATHS;
     }
 
     /**
@@ -153,25 +307,24 @@ class ConsoleAnalyzer
         $schedule = [];
 
         $traverser = new NodeTraverser;
-        $visitor = new class($file) extends NodeVisitorAbstract
+        $visitor = new class($file, $parsed['useMap'] ?? []) extends NodeVisitorAbstract
         {
             public array $commands = [];
 
             public array $schedule = [];
 
-            /** @var array<int, string> spl_object_id of a static call => frequency read off its chain */
-            private array $chainFrequencies = [];
+            private ScheduleChainIndex $chains;
 
-            public function __construct(private string $file) {}
+            /** @param array<string, string> $useMap */
+            public function __construct(private string $file, private array $useMap)
+            {
+                $this->chains = new ScheduleChainIndex;
+            }
 
             public function enterNode(Node $node): ?int
             {
-                // Frequency lives on the calls wrapped AROUND the registration
-                // (`Schedule::command(...)->dailyAt(...)`), and a node cannot see its own
-                // parents. Traversal is top-down, so the chain is read on the way in and
-                // parked for the static call that arrives a few nodes later.
                 if ($node instanceof Node\Expr\MethodCall) {
-                    $this->rememberChainFrequency($node);
+                    $this->chains->remember($node);
                 }
 
                 if (! $node instanceof Node\Expr\StaticCall) {
@@ -202,11 +355,14 @@ class ConsoleAnalyzer
                 if ($class === 'Schedule' && in_array($method, ['command', 'job', 'call'], true)) {
                     $target = $this->scheduleTarget($method, $node->args[0] ?? null);
                     if ($target !== null) {
-                        $this->schedule[] = new ScheduleEntry(
-                            type: $method,
-                            target: $target,
-                            frequency: $this->walkChainForFrequency($node),
-                            file: $this->file,
+                        $this->schedule[] = ScheduleEntry::fromChain(
+                            $method,
+                            $target,
+                            $this->file,
+                            $this->chains->for($node),
+                            ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
+                            ConsoleAnalyzer::closureArgument($node->args[0] ?? null),
+                            $this->useMap,
                         );
                     }
                 }
@@ -237,35 +393,6 @@ class ConsoleAnalyzer
                 }
 
                 return null;
-            }
-
-            private function walkChainForFrequency(Node $node): string
-            {
-                return $this->chainFrequencies[spl_object_id($node)] ?? '';
-            }
-
-            /**
-             * Read the first frequency method off a `Schedule::…()->frequency()->…` chain and
-             * park it under the static call the chain is built on.
-             */
-            private function rememberChainFrequency(Node\Expr\MethodCall $node): void
-            {
-                $frequency = '';
-                $current = $node;
-
-                while ($current instanceof Node\Expr\MethodCall) {
-                    $name = $current->name instanceof Node\Identifier ? $current->name->toString() : '';
-                    if ($frequency === '' && in_array($name, ConsoleAnalyzer::FREQUENCY_METHODS, true)) {
-                        $frequency = $name;
-                    }
-                    $current = $current->var;
-                }
-
-                if ($frequency === '' || ! $current instanceof Node\Expr\StaticCall) {
-                    return;
-                }
-
-                $this->chainFrequencies[spl_object_id($current)] ??= $frequency;
             }
 
             private function strArg(?Node $node): ?string
@@ -461,13 +588,49 @@ class ConsoleAnalyzer
 
             public array $schedule = [];
 
+            /**
+             * Names of the scheduler variables currently in scope, innermost last.
+             *
+             * Scoping the search to them is what makes matching `->call(...)` safe. Matching
+             * the bare method name anywhere in the file turned every `$this->app->call($x)`
+             * in a Console Kernel into a scheduled closure that runs on no cadence at all.
+             *
+             * @var string[]
+             */
+            private array $schedulers = [];
+
+            private ScheduleChainIndex $chains;
+
             public function __construct(
                 private string $file,
                 private array $useMap,
-            ) {}
+            ) {
+                $this->chains = new ScheduleChainIndex;
+            }
+
+            public function leaveNode(Node $node): ?int
+            {
+                if ($this->schedulerParameterName($node) !== null) {
+                    array_pop($this->schedulers);
+                }
+
+                return null;
+            }
 
             public function enterNode(Node $node): ?int
             {
+                // Both scheduling containers hand the scheduler in as a parameter, so the name
+                // to look for is read off the signature rather than assumed to be `$schedule`:
+                // `Kernel::schedule(Schedule $s)` is as valid as the stub Laravel ships.
+                $scheduler = $this->schedulerParameterName($node);
+                if ($scheduler !== null) {
+                    $this->schedulers[] = $scheduler;
+                }
+
+                if ($node instanceof Node\Expr\MethodCall) {
+                    $this->chains->remember($node);
+                }
+
                 // protected $commands = [FooCommand::class, ...]
                 if ($node instanceof Node\Stmt\Property) {
                     foreach ($node->props as $prop) {
@@ -499,45 +662,21 @@ class ConsoleAnalyzer
                 // $schedule->command('sig')->daily()
                 // $schedule->job(new MyJob)->hourly()
                 // $schedule->call(function(){})->everyMinute()
-                if ($node instanceof Node\Expr\MethodCall) {
+                if ($node instanceof Node\Expr\MethodCall && $this->isSchedulerCall($node)) {
                     $method = $node->name instanceof Node\Identifier
                         ? $node->name->toString()
-                        : null;
+                        : '';
 
-                    if ($method === 'command' && ! empty($node->args)) {
-                        $sig = $this->strArg($node->args[0]);
-                        if ($sig) {
-                            $this->schedule[] = new ScheduleEntry(
-                                type: 'command',
-                                target: $sig,
-                                frequency: $this->chainFrequency($node),
-                                file: $this->file,
-                            );
-                        }
-                    }
-
-                    if ($method === 'job' && ! empty($node->args)) {
-                        $arg = $node->args[0]->value;
-                        $target = '';
-                        if ($arg instanceof Node\Expr\New_ && $arg->class instanceof Node\Name) {
-                            $target = $this->resolveClass($arg->class->toString());
-                        }
-                        if ($target) {
-                            $this->schedule[] = new ScheduleEntry(
-                                type: 'job',
-                                target: $target,
-                                frequency: $this->chainFrequency($node),
-                                file: $this->file,
-                            );
-                        }
-                    }
-
-                    if ($method === 'call') {
-                        $this->schedule[] = new ScheduleEntry(
-                            type: 'call',
-                            target: 'Closure',
-                            frequency: $this->chainFrequency($node),
-                            file: $this->file,
+                    $target = $this->registrationTarget($method, $node->args[0] ?? null);
+                    if ($target !== null) {
+                        $this->schedule[] = ScheduleEntry::fromChain(
+                            $method,
+                            $target,
+                            $this->file,
+                            $this->chains->for($node),
+                            ConsoleAnalyzer::closureFlowSteps($node->args[0] ?? null),
+                            ConsoleAnalyzer::closureArgument($node->args[0] ?? null),
+                            $this->useMap,
                         );
                     }
                 }
@@ -545,23 +684,75 @@ class ConsoleAnalyzer
                 return null;
             }
 
-            /** Walk the method chain to find the first frequency-like method. */
-            private function chainFrequency(Node\Expr\MethodCall $node): string
+            /** True when the call is a registration made ON a scheduler that is in scope. */
+            private function isSchedulerCall(Node\Expr\MethodCall $node): bool
             {
-                // The node itself may be wrapped by frequency calls further up;
-                // we look at the var chain (the receiver of this call)
-                $current = $node;
-                while ($current instanceof Node\Expr\MethodCall) {
-                    $m = $current->name instanceof Node\Identifier
-                        ? $current->name->toString()
-                        : '';
-                    if (in_array($m, ConsoleAnalyzer::FREQUENCY_METHODS, true)) {
-                        return $m;
-                    }
-                    $current = $current->var;
+                $method = $node->name instanceof Node\Identifier ? $node->name->toString() : '';
+
+                return in_array($method, ScheduleChainIndex::REGISTRATION_METHODS, true)
+                    && $node->var instanceof Node\Expr\Variable
+                    && is_string($node->var->name)
+                    && in_array($node->var->name, $this->schedulers, true);
+            }
+
+            /** What a scheduled entry points at, or null when the argument says nothing usable. */
+            private function registrationTarget(string $method, ?Node\Arg $arg): ?string
+            {
+                if ($method === 'call') {
+                    return 'Closure';
                 }
 
-                return '';
+                if ($arg === null) {
+                    return null;
+                }
+
+                if ($method === 'command') {
+                    return $this->strArg($arg) ?: null;
+                }
+
+                // job() takes either an instance or a class name, and both spellings appear in
+                // the wild; reading only `new Job` dropped every `job(Job::class)` entry.
+                $value = $arg->value;
+                if ($value instanceof Node\Expr\New_ && $value->class instanceof Node\Name) {
+                    return $this->resolveClass($value->class->toString()) ?: null;
+                }
+
+                return $this->resolveClassConst($value) ?: null;
+            }
+
+            /**
+             * The scheduler parameter of a node that opens a scheduling scope: the legacy
+             * `Kernel::schedule()` method, or the closure handed to `withSchedule()` in the
+             * modern bootstrap/app.php form.
+             */
+            private function schedulerParameterName(Node $node): ?string
+            {
+                if ($node instanceof Node\Stmt\ClassMethod && $node->name->toString() === 'schedule') {
+                    return $this->firstParameterName($node->params);
+                }
+
+                if ($node instanceof Node\Expr\MethodCall
+                    && $node->name instanceof Node\Identifier
+                    && $node->name->toString() === 'withSchedule') {
+                    $arg = $node->args[0] ?? null;
+                    $closure = $arg instanceof Node\Arg ? $arg->value : null;
+
+                    if ($closure instanceof Node\Expr\Closure || $closure instanceof Node\Expr\ArrowFunction) {
+                        return $this->firstParameterName($closure->params);
+                    }
+                }
+
+                return null;
+            }
+
+            /** @param  Node\Param[]  $params */
+            private function firstParameterName(array $params): ?string
+            {
+                $first = $params[0] ?? null;
+
+                return $first !== null && $first->var instanceof Node\Expr\Variable && is_string($first->var->name)
+                    ? $first->var->name
+                    : null;
             }
 
             private function resolveClassConst(Node $node): string

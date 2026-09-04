@@ -167,6 +167,22 @@ export interface MethodInfo {
   hasN1: boolean
 }
 
+/**
+ * When and what a scheduled task runs, carried on the manifest so the sidebar row can say it
+ * without the reader opening the tab.
+ *
+ * `cadence` is already rendered for reading — the raw expression for `cron('0 3 * * *')`,
+ * `dailyAt 05:30` for a cadence that took arguments — and is empty when the schedule chain
+ * never stated one at all.
+ */
+export interface ScheduleInfo {
+  type: 'command' | 'job' | 'call'
+  target: string
+  cadence: string
+  timezone: string
+  modifiers: string[]
+}
+
 export interface TabEntry {
   id: string
   label: string
@@ -184,6 +200,7 @@ export interface TabEntry {
   fatMethodCount?: number
   fatClassCount?: number
   changeStatus?: 'new' | 'changed' | 'unchanged'
+  schedule?: ScheduleInfo
 }
 
 export interface Manifest {

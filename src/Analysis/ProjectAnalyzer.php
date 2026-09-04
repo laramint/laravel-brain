@@ -160,7 +160,7 @@ class ProjectAnalyzer
         $this->consoleAnalyzer = new ConsoleAnalyzer(
             consoleRoutePaths: $cmdConfig['console_route_paths'] ?? ['routes/*/*.php'],
             classPaths: $cmdConfig['class_paths'] ?? ['app/Console/Commands/*/*.php'],
-            kernelPaths: $cmdConfig['kernel_paths'] ?? ['app/Console/Kernel.php'],
+            kernelPaths: $cmdConfig['kernel_paths'] ?? ConsoleAnalyzer::DEFAULT_KERNEL_PATHS,
         );
 
         $this->middlewareAnalyzer = new MiddlewareAnalyzer;
@@ -505,6 +505,26 @@ class ProjectAnalyzer
         $consoleResult = $this->consoleAnalyzer->analyze($projectRoot);
         $commands = $consoleResult['commands'];
         $schedules = $consoleResult['schedule'];
+
+        // A `Schedule::call(fn)` has no class behind it, so nothing it calls would ever become a
+        // node: its tab would hold the task and none of the work it sets off. A closure route is
+        // already traced this way, and a scheduled closure is the same shape — descend from the
+        // closure, with the schedule's own node id standing in for the calling class.
+        foreach ($schedules as $entry) {
+            if ($entry->closureNode === null) {
+                continue;
+            }
+
+            foreach ($this->methodTracer->traceClosure(
+                $entry->closureNode,
+                $entry->closureUseMap,
+                $entry->nodeId(),
+                $psr4Map,
+                $projectRoot,
+            ) as $edge) {
+                $callChain[] = $edge;
+            }
+        }
         $this->emit('step:done', ['step' => 'commands', 'count' => count($commands), 'unit' => 'command', 'extra' => count($schedules).' scheduled', 'message' => '    Found '.count($commands).' command(s), '.count($schedules).' schedule(s)']);
 
         $this->emit('step:start', ['step' => 'channels', 'label' => 'Scanning broadcast channels', 'message' => '  → Scanning broadcast channels...']);

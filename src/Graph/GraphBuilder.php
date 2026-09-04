@@ -254,6 +254,21 @@ class GraphBuilder
         return $this->jobAnalyzer ??= new JobAnalyzer;
     }
 
+    /**
+     * The command name out of a signature or a scheduled target.
+     *
+     * A signature carries its argument and option definitions — often across several lines — and
+     * a schedule carries the name plus whatever arguments that run passes. Both reduce to the
+     * first whitespace-delimited token, which is the only part the two spellings share.
+     */
+    private static function commandName(string $signatureOrTarget): string
+    {
+        $trimmed = trim($signatureOrTarget);
+        $end = strcspn($trimmed, " \t\n\r");
+
+        return substr($trimmed, 0, $end);
+    }
+
     private function resolveFile(string $fqcn): string
     {
         return $this->resolveFileMemo[$fqcn] ??= $this->resolveFileUncached($fqcn);
@@ -1113,8 +1128,8 @@ class GraphBuilder
             return $this->viewNodeId($fqcn);
         }
 
-        // Closure route virtual FQCN — the string IS the route node ID already
-        if (str_starts_with($fqcn, 'route::')) {
+        // Closure route and scheduled-closure virtual FQCNs — the string IS the node ID already
+        if (str_starts_with($fqcn, 'route::') || str_starts_with($fqcn, 'schedule::')) {
             return $fqcn;
         }
 
@@ -2602,8 +2617,16 @@ class GraphBuilder
         // Build a map from command FQCN → node ID so edges can reference back to command nodes
         $classToCmdId = [];
 
+        // A command node is keyed by its whole signature, option definitions and all. A schedule
+        // names the command it runs, and nothing more — `core:currency-rates:import`. Matching
+        // one against the other only ever succeeded for commands that declare no options at all:
+        // measured on a 60-module application, 4 of 59 scheduled tasks found their command and
+        // 55 drew as a lone node with nothing under them. So the name is indexed separately.
+        $nameToCmdId = [];
+
         foreach ($commands as $cmd) {
             $id = "command::{$cmd->signature}";
+            $nameToCmdId[self::commandName($cmd->signature)] ??= $id;
             $flowSteps = [];
             $metrics = [];
             $hasN1 = false;
@@ -2653,24 +2676,43 @@ class GraphBuilder
         }
 
         foreach ($schedules as $entry) {
-            $schedId = 'schedule::'.md5($entry->type.$entry->target.$entry->frequency);
+            $schedId = $entry->nodeId();
 
             if (! $this->graph->hasNode($schedId)) {
-                $label = $entry->frequency
-                    ? "{$entry->target} ({$entry->frequency})"
+                $cadence = $entry->cadence();
+                $label = $cadence !== ''
+                    ? "{$entry->target} ({$cadence})"
                     : $entry->target;
 
                 $this->graph->addNode(new Node($schedId, 'schedule', $label, [
-                    'type' => $entry->type,
+                    // NOT `type`. The viewer reads a node's kind out of its data, so a `type` key
+                    // here overwrites the node's own kind and a scheduled task draws as whatever
+                    // it runs — a schedule for a command rendered as a second, identical-looking
+                    // command node sitting above the real one.
+                    'targetType' => $entry->type,
                     'target' => $entry->target,
                     'frequency' => $entry->frequency,
+                    'frequencyArguments' => $entry->frequencyArguments,
+                    'cadence' => $cadence,
+                    'modifiers' => $entry->modifiers,
+                    'timezone' => $entry->timezone,
                     'file' => $entry->file,
+                    // A closure task has nothing to link to, so its own body is the only thing
+                    // the tab can show. Omitted when empty rather than rendering an empty chart.
+                    ...($entry->flowSteps === [] ? [] : ['flowSteps' => $entry->flowSteps]),
                 ]));
             }
 
-            // Edge: schedule → command/job node if it exists
-            $targetId = "command::{$entry->target}";
-            if ($this->graph->hasNode($targetId)) {
+            // Edge: schedule → the command it runs. Looked up by name, because the target is a
+            // name and the node id is a signature; the exact-id form silently matched only the
+            // commands that happen to declare no options.
+            // A schedule may name the command by class instead — `Schedule::command(Foo::class)`
+            // — which matches neither the signature nor the name, so the class index answers for
+            // that spelling. Three ways of naming one command, one lookup order.
+            $targetId = $classToCmdId[ltrim($entry->target, '\\')]
+                ?? $nameToCmdId[self::commandName($entry->target)]
+                ?? null;
+            if ($targetId !== null && $this->graph->hasNode($targetId)) {
                 $this->addEdge($schedId, $targetId, 'runs', 'schedule-to-command');
             }
         }

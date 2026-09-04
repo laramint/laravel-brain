@@ -56,7 +56,7 @@ Laravel Brain is a dev-only tool, installed with `--dev`. Its routes, commands, 
 - **Unresolved dispatch detection** — Flags a job/event dispatch that can't be resolved statically (a variable or factory result) instead of silently showing "no impact"; recognizes custom dispatch helper functions too
 - **Filament PHP support** — Discovers panels, resources, pages, widgets, and relation managers; traces call chains from Filament page methods the same way controller actions are traced
 - **Artisan command discovery** — Maps class-based commands, closure commands from `routes/console.php`, and Kernel-registered commands
-- **Scheduler tracing** — Visualizes scheduled tasks (`command`, `job`, `call`) with their frequency
+- **Scheduler tracing** — Lists every scheduled task (`command`, `job`, `call`) with the time it runs, its timezone, and its overlap/one-server guards
 - **Broadcast channel mapping** — Discovers class-based and closure channels from `routes/channels.php`
 - **DB query tracing** — Surfaces Eloquent and raw queries per method
 - **Cache operation tracing** — Surfaces `Cache::` facade and `cache()` helper calls per method, split into read / write / invalidate / lock, with the key (literal or constructed — a computed one is labelled, never guessed), plus tags, store and TTL where declared
