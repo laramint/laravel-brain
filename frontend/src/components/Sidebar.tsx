@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
 import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation, HttpCall } from '../types/graph'
+import { UNFOLLOWABLE_REFERENCE_LABELS } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
 import { FlowchartModal } from './FlowchartModal'
@@ -25,6 +26,10 @@ interface Props {
 }
 
 const TYPE_COLORS: Record<string, string> = {
+  entry_point:       '#22D3EE',
+  entry_point_group: '#0E7490',
+  unreached_class:   '#94A3B8',
+  unreached_group:   '#475569',
   route:      '#4CAF50',
   middleware: '#FF9800',
   controller: '#2196F3',
@@ -343,6 +348,8 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'job' &&
       key !== 'deferredDefect' &&
       key !== 'deferredDefectMessage' &&
+      key !== 'note' &&
+      key !== 'unfollowableReferences' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -352,6 +359,14 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const event = node.data?.event as import('../types/graph').EventNodeData | undefined
   const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
   const job = node.data?.job as import('../types/graph').JobNodeData | undefined
+
+  // The Reachability tab's caveat, rendered next to the class rather than left in a heading
+  // three levels up the tree. A reader who clicks a class and is told only that nothing
+  // reaches it has been told the wrong thing.
+  const reachabilityNote = typeof node.data?.note === 'string' ? node.data.note : ''
+  const unfollowableReferences = Array.isArray(node.data?.unfollowableReferences)
+    ? (node.data.unfollowableReferences as string[])
+    : []
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -1019,6 +1034,25 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       <span className="prop-key">decided at runtime</span>
                       <span className="prop-value">{job.dynamic.map((d) => `${d}()`).join(', ')}</span>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {reachabilityNote !== '' && (
+                <div className="sidebar-section">
+                  <h3>What this means</h3>
+                  <p className="reachability-note">{reachabilityNote}</p>
+                  {unfollowableReferences.length > 0 && (
+                    <>
+                      <p className="reachability-note">
+                        Brain did find this class referenced, in ways it cannot follow:
+                      </p>
+                      <ul className="reachability-references">
+                        {unfollowableReferences.map(ref => (
+                          <li key={ref}>{UNFOLLOWABLE_REFERENCE_LABELS[ref] ?? ref}</li>
+                        ))}
+                      </ul>
+                    </>
                   )}
                 </div>
               )}

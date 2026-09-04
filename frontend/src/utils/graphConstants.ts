@@ -87,6 +87,12 @@ export const ACCENT_COLORS: Record<string, string> = {
   filament_page_method:      '#E879F9',
   filament_widget:           '#06B6D4',
   filament_relation_manager: '#0891B2',
+  entry_point:               '#22D3EE',
+  entry_point_group:         '#0E7490',
+  // Deliberately grey. Everything on the unreached side of the Reachability tab is a
+  // question, not a verdict, and a red node reads as one.
+  unreached_class:           '#94A3B8',
+  unreached_group:           '#475569',
 }
 
 /** Darkened accent colours for text / icons on light card backgrounds */
@@ -123,6 +129,10 @@ export const ACCENT_COLORS_LIGHT: Record<string, string> = {
   filament_page_method:      '#a21caf',
   filament_widget:           '#0369a1',
   filament_relation_manager: '#075985',
+  entry_point:               '#0E7490',
+  entry_point_group:         '#155E75',
+  unreached_class:           '#475569',
+  unreached_group:           '#334155',
 }
 
 /** Dark-mode node background colours (deep tinted darks) */
@@ -159,6 +169,10 @@ export const BG_COLORS: Record<string, string> = {
   filament_page_method:      '#240E30',
   filament_widget:           '#071A1E',
   filament_relation_manager: '#06161A',
+  entry_point:               '#04171C',
+  entry_point_group:         '#03151A',
+  unreached_class:           '#111827',
+  unreached_group:           '#0B1120',
 }
 
 /** Light-mode node background colours (soft tinted pastels) */
@@ -195,6 +209,10 @@ export const BG_COLORS_LIGHT: Record<string, string> = {
   filament_page_method:      '#fef0ff',
   filament_widget:           '#ecfeff',
   filament_relation_manager: '#e0f2fe',
+  entry_point:               '#ecfeff',
+  entry_point_group:         '#cffafe',
+  unreached_class:           '#f8fafc',
+  unreached_group:           '#f1f5f9',
 }
 
 export const HIGHLIGHT_COLOR = '#8B6FE8'

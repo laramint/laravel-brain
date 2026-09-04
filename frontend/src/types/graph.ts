@@ -75,7 +75,7 @@ export interface GraphNodeMetrics {
 
 export interface GraphNode {
   id: string
-  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'listener' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager' | 'ai_agent' | 'ai_tool' | 'action_class'
+  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'listener' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager' | 'ai_agent' | 'ai_tool' | 'action_class' | 'entry_point' | 'entry_point_group' | 'unreached_class' | 'unreached_group'
   label: string
   data: Record<string, unknown>
 }
@@ -142,6 +142,31 @@ export interface ErdModelData {
   morphAlias?: string | null
   /** The app enforces a morph map and this model is not in it — `getMorphClass()` will throw. */
   morphAliasMissing?: boolean
+}
+
+/**
+ * Shape of the `data` an `unreached_class` node carries on the Reachability tab.
+ *
+ * `unfollowableReferences` is the load-bearing field: it is the difference between "nothing
+ * reaches this from a traced entry point" and "this is dead code", and the second sentence is
+ * not one Brain is in a position to make. Never render the class without it.
+ */
+export interface UnreachedClassData {
+  kind: string
+  fqcn: string
+  file: string
+  unfollowableReferences: string[]
+  tracerBlind: boolean
+  note: string
+}
+
+/** How each unfollowable-reference tag reads to someone who did not write the analyzer. */
+export const UNFOLLOWABLE_REFERENCE_LABELS: Record<string, string> = {
+  'container-binding': 'bound in the container',
+  facade: 'reached through a facade',
+  config: 'named in config/',
+  'inherited-by-reached-class': 'inherited by a class that is reached',
+  'class-string': 'named as a class-string elsewhere',
 }
 
 /** One node or edge in the format produced from `GraphData` (Cytoscape-compatible shape). */

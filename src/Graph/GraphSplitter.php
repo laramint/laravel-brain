@@ -12,6 +12,8 @@ use LaraMint\LaravelBrain\Analysis\FilamentPageDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentPanelDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
+use LaraMint\LaravelBrain\Analysis\Reachability\ReachabilityReport;
+use LaraMint\LaravelBrain\Analysis\Reachability\UnreachedClass;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
@@ -948,5 +950,241 @@ class GraphSplitter
         }
 
         return $id;
+    }
+
+    /**
+     * Build the standalone "Reachability" tab: the roots the application can be entered
+     * from, and the classes no root's call chain arrives at.
+     *
+     * Every other tab is grown forward from one entry point, which is why a gap in the graph
+     * has never been visible from inside it — measured on one application the graph knew 45
+     * of 211 event classes and 27 of 113 job classes, and no screen said so. This tab is the
+     * inverse view, and independent of routes for the same reason the ERD tab is.
+     *
+     * Three sections, in the order a reader needs them:
+     *
+     *  1. Entry points, by kind. The denominator — nothing is reachable except through one
+     *     of these, so their inventory is what makes the other two sections mean anything.
+     *  2. Classes nothing reaches, by kind, largest kind first. Each carries every reference
+     *     Brain found and could not follow, because "nothing reaches this from a traced
+     *     entry point" and "this is dead code" are different sentences and the second one is
+     *     not Brain's to make.
+     *  3. Kinds the tracer has no edge type for at all — service providers, exceptions. Kept
+     *     apart rather than mixed in: their absence from the graph is the expected outcome,
+     *     and a hundred non-findings on top of the real ones is how a report gets ignored.
+     *
+     * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
+     */
+    public function buildReachabilityTab(
+        ReachabilityReport $report,
+        string $projectName,
+        string $analyzedAt,
+    ): ?array {
+        if ($report->entryPoints === [] && $report->unreached === []) {
+            return null;
+        }
+
+        $graph = new Graph;
+        $graph->setMeta(['project' => $projectName, 'analyzedAt' => $analyzedAt]);
+
+        $this->addEntryPointSection($graph, $report);
+        $this->addUnreachedSection(
+            $graph,
+            $report->unreachedByKind(),
+            'reachability::unreached',
+            'Nothing reaches these from an entry point',
+            self::UNREACHED_NOTE,
+        );
+        $this->addUnreachedSection(
+            $graph,
+            $report->unreachedByKind(tracerBlind: true),
+            'reachability::unfollowed',
+            'Outside what the tracer follows',
+            self::TRACER_BLIND_NOTE,
+        );
+
+        $tabId = 'reachability--inventory';
+
+        return [
+            'id' => $tabId,
+            'graph' => $graph,
+            'manifest' => new TabManifestEntry(
+                id: $tabId,
+                label: 'Reachability',
+                routeCount: count($report->unreached),
+                nodeCount: $graph->nodeCount(),
+                edgeCount: $graph->edgeCount(),
+                file: ".graph-{$tabId}.json",
+                category: 'Reachability',
+            ),
+        ];
+    }
+
+    /**
+     * The sentence this tab must never be read as saying something stronger than.
+     */
+    private const UNREACHED_NOTE = 'No traced call chain from an entry point arrives at these classes. '
+        .'That is a statement about what the tracer can follow, not about whether the code runs: '
+        .'anything resolved out of the container, fronted by a facade, named as a string in config, '
+        .'or built by reflection is invisible to it. Every reference Brain did find is listed on the class.';
+
+    private const TRACER_BLIND_NOTE = 'Brain has no call edge for these kinds at all — the framework '
+        .'boots a service provider and an exception is thrown rather than called — so their absence '
+        .'from the graph is expected and says nothing either way. They are listed for inventory only.';
+
+    private function addEntryPointSection(Graph $graph, ReachabilityReport $report): void
+    {
+        $rootId = 'reachability::entry-points';
+        $graph->addNode(new Node(
+            id: $rootId,
+            type: 'entry_point_group',
+            label: 'Entry points ('.count($report->entryPoints).')',
+            data: [
+                'section' => 'entry-points',
+                'count' => count($report->entryPoints),
+                'classesDeclared' => $report->classesDeclared,
+                'classesReached' => $report->classesReached,
+                'note' => 'Every root the application can be entered from. Nothing in the graph is '
+                    .'reachable except through one of these.',
+            ],
+        ));
+
+        foreach ($report->entryPointsByKind() as $kind => $entryPoints) {
+            $groupId = $rootId.'::'.$kind;
+            $graph->addNode(new Node(
+                id: $groupId,
+                type: 'entry_point_group',
+                label: $this->groupLabel($kind, count($entryPoints)),
+                // Folded on arrival: the members are the inventory, and a canvas that opens
+                // with every one of them drawn is unreadable at any zoom. The group says how
+                // many it holds; the reader opens the one they came for.
+                data: ['section' => 'entry-points', 'kind' => $kind, 'count' => count($entryPoints), 'collapsedByDefault' => true],
+            ));
+            $this->addGroupEdge($graph, $rootId, $groupId, 'entry-point-group');
+
+            foreach ($entryPoints as $index => $entryPoint) {
+                $nodeId = $groupId.'::'.$index;
+                $graph->addNode(new Node(
+                    id: $nodeId,
+                    type: 'entry_point',
+                    label: $entryPoint->label,
+                    data: [
+                        'section' => 'entry-points',
+                        'kind' => $kind,
+                        'fqcn' => $entryPoint->fqcn,
+                        'file' => $entryPoint->file,
+                        'detail' => $entryPoint->detail,
+                    ],
+                ));
+                $this->addGroupEdge($graph, $groupId, $nodeId, 'entry-point');
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, list<UnreachedClass>>  $byKind
+     */
+    private function addUnreachedSection(
+        Graph $graph,
+        array $byKind,
+        string $rootId,
+        string $rootLabel,
+        string $note,
+    ): void {
+        if ($byKind === []) {
+            return;
+        }
+
+        $total = 0;
+        foreach ($byKind as $classes) {
+            $total += count($classes);
+        }
+
+        $graph->addNode(new Node(
+            id: $rootId,
+            type: 'unreached_group',
+            label: "{$rootLabel} ({$total})",
+            data: ['section' => 'unreached', 'count' => $total, 'note' => $note],
+        ));
+
+        foreach ($byKind as $kind => $classes) {
+            $groupId = $rootId.'::'.$kind;
+            $graph->addNode(new Node(
+                id: $groupId,
+                type: 'unreached_group',
+                label: $this->groupLabel($kind, count($classes)),
+                data: ['section' => 'unreached', 'kind' => $kind, 'count' => count($classes), 'note' => $note, 'collapsedByDefault' => true],
+            ));
+            $this->addGroupEdge($graph, $rootId, $groupId, 'unreached-group');
+
+            foreach ($classes as $class) {
+                $nodeId = 'unreached::'.strtolower((string) preg_replace('/[^a-zA-Z0-9_]/', '_', $class->fqcn));
+                $graph->addNode(new Node(
+                    id: $nodeId,
+                    type: 'unreached_class',
+                    label: $this->shortName($class->fqcn),
+                    data: [
+                        'section' => 'unreached',
+                        'kind' => $kind,
+                        'fqcn' => $class->fqcn,
+                        'file' => $class->file,
+                        'unfollowableReferences' => $class->unfollowableReferences,
+                        'tracerBlind' => $class->tracerBlind,
+                        'note' => $note,
+                    ],
+                ));
+                $this->addGroupEdge($graph, $groupId, $nodeId, 'unreached');
+            }
+        }
+    }
+
+    private function addGroupEdge(Graph $graph, string $source, string $target, string $type): void
+    {
+        $graph->addEdge(new Edge(
+            id: 'reach::'.md5($source.'|'.$target),
+            source: $source,
+            target: $target,
+            label: '',
+            type: $type,
+        ));
+    }
+
+    /**
+     * Plural group heading for a kind. Unknown kinds fall through to the kind name with an
+     * "s" — a new node type added elsewhere in Brain then reads slightly awkwardly rather
+     * than vanishing from the tab.
+     */
+    private function groupLabel(string $kind, int $count): string
+    {
+        $label = match ($kind) {
+            'route' => 'Routes',
+            'command' => 'Console commands',
+            'schedule' => 'Scheduled entries',
+            'channel' => 'Broadcast channels',
+            'queued_listener' => 'Queued listeners',
+            'filament' => 'Filament',
+            'abstract_class' => 'Abstract classes',
+            'policy' => 'Policies',
+            'repository' => 'Repositories',
+            'service_provider' => 'Service providers',
+            'middleware' => 'Middleware',
+            'mail' => 'Mailables',
+            'notification' => 'Notifications',
+            'resource' => 'API resources',
+            'controller' => 'Controllers',
+            'exception' => 'Exceptions',
+            'interface' => 'Interfaces',
+            'trait' => 'Traits',
+            'enum' => 'Enums',
+            'model' => 'Models',
+            'listener' => 'Listeners',
+            'observer' => 'Observers',
+            'service' => 'Services',
+            'event' => 'Events',
+            'job' => 'Jobs',
+            default => ucfirst(str_replace('_', ' ', $kind)).'s',
+        };
+
+        return "{$label} ({$count})";
     }
 }

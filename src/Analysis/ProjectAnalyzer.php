@@ -7,6 +7,11 @@ namespace LaraMint\LaravelBrain\Analysis;
 use LaraMint\LaravelBrain\Analysis\Incremental\IncrementalMerge;
 use LaraMint\LaravelBrain\Analysis\Incremental\ScopedRebuildNotApplicable;
 use LaraMint\LaravelBrain\Analysis\Incremental\ScopeExpansion;
+use LaraMint\LaravelBrain\Analysis\Reachability\ClassInventory;
+use LaraMint\LaravelBrain\Analysis\Reachability\ClassStringIndex;
+use LaraMint\LaravelBrain\Analysis\Reachability\EntryPointInventory;
+use LaraMint\LaravelBrain\Analysis\Reachability\ReachabilityAnalyzer;
+use LaraMint\LaravelBrain\Analysis\Reachability\ReachabilityReport;
 use LaraMint\LaravelBrain\Graph\Graph;
 use LaraMint\LaravelBrain\Graph\GraphBuilder;
 use LaraMint\LaravelBrain\Graph\GraphSplitter;
@@ -44,6 +49,8 @@ class AnalysisResult
          * @var array<string, int>
          */
         public array $nodesOutsideTabs = [],
+        /** Null when laravel-brain.reachability.enabled is off — the pass did not run. */
+        public ?ReachabilityReport $reachability = null,
     ) {}
 }
 
@@ -102,13 +109,25 @@ class ProjectAnalyzer
 
     private ?int $schemaTimeout = null;
 
-    /** @var string[] class-file search roots, relative to the project root */
+    /**
+     * Class-file search roots, relative to the project root.
+     *
+     * Kept as a property because the reachability pass needs the same directories the rest of
+     * the build resolves classes against — asking a differently-shaped question of a
+     * differently-shaped source tree would report classes as unreached that the graph never
+     * had a chance to reach.
+     *
+     * @var string[]
+     */
     private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
 
     /** Whether this build reports the outgoing HTTP calls each node makes. */
     private bool $detectOutgoingHttp = true;
 
     private bool $serviceProviderAnalysisEnabled = true;
+
+    /** Whether the reachability pass runs — see laravel-brain.reachability.enabled. */
+    private bool $reachabilityEnabled = true;
 
     /** @var callable(string, array): void */
     private $onProgress;
@@ -131,6 +150,8 @@ class ProjectAnalyzer
         $sourcePaths = is_array($sourcePaths) && $sourcePaths !== []
             ? $sourcePaths
             : SourceDirectories::DEFAULT_SOURCE_PATHS;
+        $this->sourcePaths = $sourcePaths;
+        $this->reachabilityEnabled = (bool) config('laravel-brain.reachability.enabled', false);
 
         $listenerPaths = config('laravel-brain.listeners.paths', ['app/Listeners']);
         $this->listenerPaths = is_array($listenerPaths) ? array_values($listenerPaths) : ['app/Listeners'];
@@ -435,7 +456,9 @@ class ProjectAnalyzer
             }
         }
 
-        // Link dispatched events to the listeners that handle them.
+        // Link dispatched events to the listeners that handle them. Held separately as well:
+        // a queued listener is an entry point in its own right — a worker runs it with no
+        // caller — and these edges are the only place a build learns which listeners exist.
         $listenerEdges = $this->listenerAnalyzer->analyze($projectRoot, $psr4Map);
         foreach ($listenerEdges as $edge) {
             $callChain[] = $edge;
@@ -784,6 +807,54 @@ class ProjectAnalyzer
             $split['manifest'][] = $ai['manifest'];
         }
 
+        // Built after the split, and from the same graph the split reads, so the tab reports
+        // exactly what the rest of the interface is showing rather than a second opinion.
+        $reachability = null;
+        if ($this->reachabilityEnabled) {
+            $this->emit('step:start', ['step' => 'reachability', 'label' => 'Checking reachability', 'message' => '  → Checking reachability...']);
+
+            $classInventory = ClassInventory::scan($projectRoot, $this->sourcePaths);
+            $entryPoints = EntryPointInventory::collect(
+                routes: $routes,
+                commands: $commands,
+                schedules: $schedules,
+                channels: $channels,
+                listenerEdges: $listenerEdges,
+                filamentPanels: $filamentResult['panels'],
+                filamentResources: $filamentResult['resources'],
+                filamentPages: $filamentResult['pages'],
+                classes: $classInventory,
+            );
+
+            $reachability = (new ReachabilityAnalyzer)->analyze(
+                $fullGraph,
+                $entryPoints,
+                $classInventory,
+                $bindingRegistry,
+                $facadeRegistry,
+                // A second traversal of the same files, not a second parse: PhpFileParser
+                // shares its results process-wide, so both passes read one AST per file.
+                ClassStringIndex::scan($projectRoot, $this->sourcePaths),
+                ClassStringIndex::scan($projectRoot, ['config']),
+            );
+
+            $reachabilityTab = $this->graphSplitter->buildReachabilityTab($reachability, $projectName, $analyzedAt);
+            if ($reachabilityTab !== null) {
+                $split['subgraphs'][$reachabilityTab['id']] = $reachabilityTab['graph'];
+                $split['manifest'][] = $reachabilityTab['manifest'];
+            }
+
+            $this->emit('step:done', [
+                'step' => 'reachability',
+                'count' => count($reachability->unreached),
+                'unit' => 'unreached class',
+                'extra' => count($entryPoints).' entry points',
+                'message' => '    '.count($entryPoints).' entry point(s), '
+                    .count($reachability->unreached).' of '.$reachability->classesDeclared
+                    .' class(es) reached by none of them',
+            ]);
+        }
+
         $this->emit('step:done', ['step' => 'split', 'count' => count($split['subgraphs']), 'unit' => 'tab', 'message' => '    '.count($split['subgraphs']).' tab(s) generated']);
 
         $manifestJson = $this->graphSplitter->buildManifestJson(
@@ -804,6 +875,7 @@ class ProjectAnalyzer
             unresolvedDispatchers: $this->methodTracer->unresolvedDispatchers(),
             isolatedNodes: $fullGraph->isolatedNodeCountsByType(),
             nodesOutsideTabs: GraphSplitter::nodesOutsideTabs($fullGraph, $split['subgraphs']),
+            reachability: $reachability,
         );
 
         $this->emit('analysis:done', [

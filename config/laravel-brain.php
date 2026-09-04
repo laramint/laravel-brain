@@ -625,6 +625,44 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Reachability
+    // -------------------------------------------------------------------------
+    // The "Reachability" tab: an inventory of every entry point the application can be
+    // entered from (routes, console commands, scheduled entries, broadcast channels, queued
+    // listeners, Filament panels/resources/pages), and the classes under `source_paths` that
+    // no entry point's traced call chain arrives at.
+    //
+    // Every other tab is grown forward from one entry point, so a gap in the graph is
+    // invisible from inside it. This is the inverse view — what exists, and what nothing
+    // reaches.
+    //
+    // Read what it reports carefully: "nothing reaches this from a traced entry point" is a
+    // statement about the tracer, not about whether the code runs. A class resolved out of
+    // the container, fronted by a facade, named as a string in config, or built by reflection
+    // is alive and still lands on the list, which is why every reference Brain *did* find is
+    // shown next to the class. It is not a dead-code report and must not be read as one.
+    //
+    // Cost: one extra parse pass over `source_paths` and over `config/`, on top of the pass a
+    // scan already makes. Turn it off if you do not want it.
+    //
+    // Override via the LARAVEL_BRAIN_REACHABILITY_ENABLED env variable.
+    //
+    'reachability' => [
+        // Off by default, which is the one setting here that is a judgement rather than a
+        // fact. The pass opens every declared class, and what that costs depends entirely on
+        // how much of the codebase the rest of the scan already parsed:
+        //
+        //   application A   build parses 746 files, inventory 4,416   scan ×3.0
+        //   application B   7,546 source files, nearly all already parsed   +2% (within noise)
+        //
+        // So the worst case is real and the typical case may be nothing. What does not vary is
+        // the shape of the answer: on a large modular application 79-90% of declared classes
+        // come back unreached, and a list that long is read once and then ignored. Turn it on
+        // when you are hunting for what nothing reaches; leave it off for a scan you run often.
+        'enabled' => env('LARAVEL_BRAIN_REACHABILITY_ENABLED', false),
+    ],
+
+    // -------------------------------------------------------------------------
     // Watch Paths
     // -------------------------------------------------------------------------
     // Directories polled by `brain:scan --watch` and hashed into the build fingerprint

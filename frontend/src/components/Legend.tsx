@@ -25,6 +25,10 @@ const NODE_TYPES = [
   { type: 'filament_page',             label: 'Filament Page',     color: '#C084FC' },
   { type: 'filament_widget',           label: 'Filament Widget',   color: '#06B6D4' },
   { type: 'filament_relation_manager', label: 'Relation Manager',  color: '#0891B2' },
+  { type: 'entry_point',               label: 'Entry point',       color: '#22D3EE' },
+  { type: 'unreached_class',           label: 'Not reached',       color: '#94A3B8' },
+  { type: 'entry_point_group',         label: 'Entry group',       color: '#0E7490' },
+  { type: 'unreached_group',           label: 'Unreached group',   color: '#475569' },
 ]
 
 export function Legend() {

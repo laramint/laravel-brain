@@ -340,6 +340,17 @@ interface Props {
  * misread, this is the one function to look at, and logging
  * `{deltaX, deltaY, deltaMode, wheelDeltaY}` from the real hardware is what decides it.
  */
+/**
+ * The nodes a tab asks to open folded.
+ *
+ * The flag is set by the splitter, not guessed from a node's size or its child count here: only
+ * the pass that built the tab knows whether its groups are the point of the screen or an
+ * incidental grouping the reader still wants to see through.
+ */
+function defaultCollapsed(ns: LayoutNode[]): Set<string> {
+  return new Set(ns.filter((n) => n.data?.collapsedByDefault === true).map((n) => n.id))
+}
+
 function isTrackpadPan(ev: WheelEvent): boolean {
   if (ev.ctrlKey) return false
   if (ev.deltaX !== 0) return true
@@ -438,14 +449,23 @@ export function GraphView({
   const isDraggingRef = useRef(false)
 
   // ── Collapse state ─────────────────────────────────────────────────────────
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set())
+  //
+  // A tab may open with parts of itself already folded. The inventory needs it: it holds one
+  // node per class nothing reaches, which on a real application is a few thousand of them, and
+  // a canvas that draws them all is unreadable at any zoom — not because the layout packs them
+  // badly, but because a list of three thousand names was never a picture. Folded to its
+  // groups it opens as a couple of dozen nodes, each saying how many it holds, and the reader
+  // opens the one they came for.
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(
+    () => defaultCollapsed(nodes),
+  )
 
   // Reset drag and collapse state when nodes change (during render, not in an effect).
   const [prevNodes, setPrevNodes] = useState(nodes)
   if (prevNodes !== nodes) {
     setPrevNodes(nodes)
     setDraggedPositions(new Map())
-    setCollapsedNodes(new Set())
+    setCollapsedNodes(defaultCollapsed(nodes))
   }
 
   const effectiveNodes = useMemo(() => {
@@ -1100,11 +1120,18 @@ export function GraphView({
     const zb = zoomBehaviorRef.current
     if (!svg || !container || !zb || !nodes.length) return
 
+    // Only what is drawn. A folded node keeps its descendants in the layout — they still hold
+    // positions, they are simply not rendered — so measuring every node fits the view to a
+    // picture nobody is looking at. On the inventory that is the difference between framing
+    // twenty-eight groups and framing four thousand classes behind them.
+    const shown = nodes.filter((n) => !hiddenNodeIds.has(n.id))
+    const framed = shown.length ? shown : nodes
+
     let minX = Infinity
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
-    for (const n of nodes) {
+    for (const n of framed) {
       minX = Math.min(minX, n.x - n.width / 2)
       maxX = Math.max(maxX, n.x + n.width / 2)
       minY = Math.min(minY, n.y - n.height / 2)
@@ -1122,7 +1149,7 @@ export function GraphView({
     const ty = h / 2 - scale * cy
     const tr = zoomIdentity.translate(tx, ty).scale(scale)
     select(svg).call(zb.transform, tr)
-  }, [nodes])
+  }, [nodes, hiddenNodeIds])
 
   const zoomBy = useCallback((factor: number) => {
     const svg = svgRef.current

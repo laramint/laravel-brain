@@ -509,6 +509,17 @@ name for a *controller action*. The two are unrelated and neither affects the ot
 "an Action" unqualified means this pattern in ordinary Laravel usage, the interface gives the
 unqualified label to `action_class` and calls `action` a **Controller action**.
 
+### Reachability
+Every other tab is grown forward from one entry point, so a gap in the graph is invisible from inside it — measured on one application, the graph knew 45 of its 211 event classes and 27 of its 113 job classes, and no screen said so.
+The **Reachability** tab is the inverse view: an inventory of every entry point (routes, console commands, scheduled entries, broadcast channels, queued listeners, Filament panels/resources/pages), and the classes under `source_paths` that no entry point's traced call chain arrives at, grouped by kind so "17 jobs nothing dispatches" is answerable at a glance.
+**It is not a dead-code report.** "Nothing reaches this from a traced entry point" is a statement about the tracer, not about whether the code runs: a class resolved out of the container, fronted by a facade, named as a string in config, or built by reflection is alive and still lands on the list. Every reference Brain *did* find — container binding, facade, `config/`, inherited by a reached class, named as a class-string elsewhere — is shown next to the class, so the two cases can be told apart. Service providers and exceptions, which Brain has no call edge for at all, are filed in a section of their own rather than mixed in.
+```php
+// config/laravel-brain.php — on by default
+'reachability' => [
+    'enabled' => false, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=false
+],
+```
+
 ## Graph Node Types
 
 | Node | Accent Color | Represents |
@@ -530,6 +541,8 @@ unqualified label to `action_class` and calls `action` a **Controller action**.
 | Filament Page Method | Pink `#E879F9` | Method on a Filament page |
 | Filament Widget | Cyan `#06B6D4` | Filament widget class |
 | Filament Relation Manager | Teal `#0891B2` | Filament relation manager |
+| Entry Point | Cyan `#22D3EE` | A root on the Reachability tab |
+| Not Reached | Grey `#94A3B8` | A class no entry point's chain arrives at. Grey on purpose — it is a question, not a verdict |
 
 > **Note:** Command, Schedule, Channel, and Repository nodes are discovered and added to the graph but use the closest matching accent color from their parent type.
 
