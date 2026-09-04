@@ -38,9 +38,10 @@ A default run â€” three scenarios, one warmup and five timed repetitions each â€
 takes a few seconds once the applications have been generated.
 
 The application is synthetic and deliberately awkward: a service, repository and
-model layer shared by many entry points, chains four deep, and classes with
-private helpers and call-free getters. It is a workload, not an average app, so
-read the absolute times as such.
+model layer shared by many entry points, chains four deep, classes with private
+helpers and call-free getters, two application facades, and a framework facade
+import on almost every class so the prefilter has something to skip. It is a
+workload, not an average app, so read the absolute times as such.
 
 ## Reading the two kinds of number
 
