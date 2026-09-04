@@ -213,3 +213,18 @@ export interface ListenerNodeData {
   queued: boolean
   deferred: boolean
 }
+
+export interface JobNodeData {
+  queued: boolean
+  tries: number | null
+  timeout: number | null
+  backoff: number | null
+  maxExceptions: number | null
+  unique: boolean
+  uniqueUntilProcessing: boolean
+  uniqueFor: number | null
+  encrypted: boolean
+  afterCommit: boolean
+  batchable: boolean
+  middleware: string[]
+  dynamic: string[]}

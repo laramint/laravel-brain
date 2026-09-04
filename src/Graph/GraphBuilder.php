@@ -20,6 +20,7 @@ use LaraMint\LaravelBrain\Analysis\FilamentRelationManagerDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentWidgetDefinition;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
+use LaraMint\LaravelBrain\Analysis\JobAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
@@ -48,6 +49,8 @@ class GraphBuilder
     private array $edgeIdOccurrence = [];
 
     private FlowExtractor $flowExtractor;
+
+    private ?JobAnalyzer $jobAnalyzer = null;
 
     private PhpFileParser $parser;
 
@@ -201,6 +204,14 @@ class GraphBuilder
      * Memoized for the build: the answer depends only on the FQCN, the PSR-4 map and the
      * project root, all fixed once buildGraph() starts.
      */
+    /**
+     * Built on first use: most graphs contain no job at all, and the parser it holds is not free.
+     */
+    private function getJobAnalyzer(): JobAnalyzer
+    {
+        return $this->jobAnalyzer ??= new JobAnalyzer;
+    }
+
     private function resolveFile(string $fqcn): string
     {
         return $this->resolveFileMemo[$fqcn] ??= $this->resolveFileUncached($fqcn);
@@ -816,12 +827,17 @@ class GraphBuilder
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
                 $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                // What the job promises when it goes wrong. The node carried its name, its file
+                // and its flow, so "this runs on a queue" was the whole story — not whether a
+                // failure is retried, nor whether a second dispatch is dropped.
+                $jobFacts = $this->getJobAnalyzer()->describe($fqcn, $file);
                 $this->graph->addNode(new Node($id, 'job', $method ? "{$short}@{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'file' => $file,
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
+                    ...($jobFacts === null ? [] : ['job' => $jobFacts->toArray()]),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
                 ]));
                 break;
