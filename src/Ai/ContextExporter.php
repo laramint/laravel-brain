@@ -293,8 +293,8 @@ class ContextExporter
         if (! empty($allCacheOps)) {
             $parts[] = '## Cache Operations';
             $parts[] = implode("\n", $allCacheOps);
-                $parts[] = '';
-            }
+            $parts[] = '';
+        }
 
         // Outgoing HTTP. Sits beside the database section because it answers the same kind of
         // question — what does this code path touch that it does not own — and because an agent
