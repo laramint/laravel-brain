@@ -2307,6 +2307,106 @@ body::before {
   color: #9C27B0;
 }
 
+/* ── Cache operations ─────────────────────────────── */
+.sidebar-section--cache h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar-section--cache h3::before {
+  content: '⛃';
+  font-size: 12px;
+}
+
+.cache-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cache-item {
+  padding: 4px 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.cache-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cache-kind {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+/* Read/write echo the DB query colours on purpose — the same question, one layer up. */
+.cache-kind--read       { background: rgba(33, 150, 243, 0.15); color: #2196F3; }
+.cache-kind--write      { background: rgba(244, 67, 54, 0.15);  color: #F44336; }
+.cache-kind--invalidate { background: rgba(255, 152, 0, 0.15);  color: #FF9800; }
+.cache-kind--lock       { background: rgba(156, 39, 176, 0.15); color: #BA68C8; }
+
+.cache-method {
+  color: var(--dim);
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.cache-key {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A key we could not read is stated as such, never dressed up as one we could. */
+.cache-key--computed {
+  color: var(--dim);
+  font-style: italic;
+}
+.cache-key--constructed {
+  color: #CE93D8;
+}
+
+.cache-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  padding-left: 2px;
+}
+
+.cache-meta {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--dim);
+}
+.cache-meta--tag {
+  background: rgba(0, 150, 136, 0.12);
+  border-color: rgba(0, 150, 136, 0.3);
+  color: #4DB6AC;
+}
+
+[data-theme="light"] .cache-item,
+[data-theme="light"] .cache-meta { background: rgba(0,0,0,0.03); }
+[data-theme="light"] .cache-key--constructed { color: #6A1B9A; }
+[data-theme="light"] .cache-meta--tag { color: #00695C; }
+
 /* ── Modals & Overlays ────────────────────────────── */
 .modal-overlay {
   position: fixed;
@@ -4007,4 +4107,16 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   color: var(--dim);
   font-size: 12px;
   padding: 4px 6px;
+}
+
+/* ── Transaction in the canvas legend ───────────────────────────────────────
+   A hollow, dashed dot rather than a filled one: every other crumb is a kind of
+   node and this is a boundary drawn around them, and the marker should say so
+   before the word does. */
+.g-crumb--aside { opacity: 0.9; }
+.g-crumb-sep { opacity: 0.45; margin-right: 8px; }
+.g-crumb-dot--dashed {
+  background: transparent !important;
+  border: 1.5px dashed currentColor;
+  border-color: inherit;
 }

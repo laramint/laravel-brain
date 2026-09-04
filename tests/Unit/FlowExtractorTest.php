@@ -6,8 +6,13 @@ use PhpParser\Node;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitorAbstract;
 
-/** Flow steps for the first method of a class written inline. */
-function flowFor(string $body, bool $relationsAutoloaded = false): array
+/**
+ * Flow steps for the first method of a class written inline.
+ *
+ * `$cacheOperations` of null leaves the extractor alone, so the calls that pass nothing are
+ * exercising the default rather than a position this helper chose for them.
+ */
+function flowFor(string $body, bool $relationsAutoloaded = false, ?bool $cacheOperations = null): array
 {
     $parsed = (new PhpFileParser)->parseCode(<<<PHP
         <?php
@@ -40,7 +45,16 @@ function flowFor(string $body, bool $relationsAutoloaded = false): array
     });
     $traverser->traverse($parsed['ast'] ?? []);
 
-    return $found === null ? [] : (new FlowExtractor($relationsAutoloaded))->extract($found, $parsed['useMap'] ?? []);
+    if ($found === null) {
+        return [];
+    }
+
+    $extractor = new FlowExtractor($relationsAutoloaded);
+    if ($cacheOperations !== null) {
+        $extractor->setCacheOperationsEnabled($cacheOperations);
+    }
+
+    return $extractor->extract($found, $parsed['useMap'] ?? []);
 }
 
 it('shows the work inside a DB::transaction, not just the wrapper', function () {
@@ -242,4 +256,136 @@ it('forgets a loop variable once the loop has ended', function () {
 
     expect($steps[0]['n1'] ?? false)->toBeTrue()
         ->and($steps[1]['n1'] ?? false)->toBeFalse();
+});
+
+it('charts a cache call as its own step type, not an anonymous call', function () {
+    // `call` and `assign` are both drawn as plain rectangles, so re-typing costs nothing and
+    // buys the one distinction worth having on a chart: this step talks to the cache.
+    $steps = flowFor('        \Cache::forget("users.index");');
+
+    expect($steps[0]['type'])->toBe('cache')
+        ->and($steps[0]['cache'])->toMatchArray([
+            'kind' => 'invalidate',
+            'method' => 'forget',
+            'key' => 'users.index',
+        ]);
+});
+
+it('charts an assignment from the cache as a cache step', function () {
+    $steps = flowFor('        $users = \Cache::get("users.index");');
+
+    expect($steps[0]['type'])->toBe('cache')
+        ->and($steps[0]['label'])->toBe('$users = Cache::get("users.index")')
+        ->and($steps[0]['cache']['kind'])->toBe('read');
+});
+
+it('leaves a returned cache read drawn as a return, with the details attached', function () {
+    // `return` is drawn as a terminal in both renderers and reads as the end of the flow;
+    // trading that shape for a colour would cost more than it buys.
+    $steps = flowFor('        return \Cache::get("users.index");');
+
+    expect($steps[0]['type'])->toBe('return')
+        ->and($steps[0]['cache']['kind'])->toBe('read');
+});
+
+it('keeps the cache details on a remember() whose body it descends into', function () {
+    // withCallbackBody() re-types the step to `loop`, the only type either renderer descends
+    // into. The cache payload has to survive that, or the commonest cache call in Laravel is
+    // the one call that never shows as one.
+    $steps = flowFor('        \Cache::remember("users.index", 600, function () {
+            return $this->repo->all();
+        });');
+
+    expect($steps[0]['type'])->toBe('loop')
+        ->and($steps[0]['body'] ?? [])->toHaveCount(1)
+        ->and($steps[0]['cache'])->toMatchArray(['kind' => 'read', 'method' => 'remember', 'ttl' => 600]);
+});
+
+it('leaves a step that touches no cache without a cache key', function () {
+    $steps = flowFor('        $this->payer->charge();');
+
+    expect($steps[0])->not->toHaveKey('cache');
+});
+
+it('detects cache operations without being asked to', function () {
+    // The default, reached without touching the setter: passing `true` would pass here even if
+    // the default had been flipped.
+    expect(flowFor('        \Cache::forget("users.index");')[0])->toHaveKey('cache');
+});
+
+it('does not look for a cache call at all once detection is off', function () {
+    // Off has to mean the step never carries a payload, not that something downstream drops it —
+    // that is the difference between the switch saving work and the switch merely hiding output.
+    $steps = flowFor('        \Cache::forget("users.index");', cacheOperations: false);
+
+    expect($steps[0])->not->toHaveKey('cache')
+        ->and($steps[0]['type'])->toBe('call');
+});
+
+it('charts the same steps with detection off, minus the cache typing', function () {
+    $on = flowFor('        $users = \Cache::get("users.index");
+        $this->payer->charge();
+        return $users;');
+    $off = flowFor('        $users = \Cache::get("users.index");
+        $this->payer->charge();
+        return $users;', cacheOperations: false);
+
+    expect(array_column($off, 'label'))->toBe(array_column($on, 'label'))
+        ->and(array_column($off, 'type'))->toBe(['assign', 'call', 'return'])
+        ->and(array_column($on, 'type'))->toBe(['cache', 'call', 'return']);
+});
+
+/** The cache operation on the first flow step that carries one. */
+function firstCacheOp(string $body): ?array
+{
+    $walk = function (array $steps) use (&$walk): ?array {
+        foreach ($steps as $step) {
+            if (isset($step['cache']) && is_array($step['cache'])) {
+                return $step['cache'];
+            }
+            foreach (['body', 'then', 'else'] as $branch) {
+                if (! empty($step[$branch]) && is_array($step[$branch])) {
+                    $found = $walk($step[$branch]);
+                    if ($found !== null) {
+                        return $found;
+                    }
+                }
+            }
+        }
+
+        return null;
+    };
+
+    return $walk(flowFor($body));
+}
+
+it('keeps a used lock a lock, rather than reading the verb applied to it', function () {
+    // The only way anyone writes a lock. This goes through FlowExtractor on purpose: it hands
+    // the detector the statement's outermost call and nothing else, which is what the pipeline
+    // does. A test that walks into the expression finds the inner `Cache::lock(...)` by itself
+    // and passes whatever the chain rule does — measured on a 60-module application, 16
+    // `Cache::lock` calls produced 0 lock operations while such a test stayed green.
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::lock("imports", 10)->get(fn () => 1);');
+
+    expect($op)->not->toBeNull()
+        ->and($op['kind'])->toBe('lock')
+        ->and($op['key'])->toBe('imports');
+});
+
+it('reads a blocking lock the same way', function () {
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::lock("imports")->block(5, fn () => 1);');
+
+    expect($op['kind'] ?? null)->toBe('lock');
+});
+
+it('sees through a memoising repository to the operation on it', function () {
+    $op = firstCacheOp('        \Illuminate\Support\Facades\Cache::memo()->get("rates");');
+
+    expect($op)->not->toBeNull()
+        ->and($op['kind'])->toBe('read')
+        ->and($op['key'])->toBe('rates');
+});
+
+it('still refuses a chain that does not start at the cache', function () {
+    expect(firstCacheOp('        $this->mutex->lock("imports")->get(fn () => 1);'))->toBeNull();
 });

@@ -1,3 +1,15 @@
+/**
+ * The frame drawn around work that runs inside a database transaction, and around the path that
+ * runs only after one rolled back.
+ *
+ * Deliberately not one of the node-type accents: a transaction is not a kind of thing, it is a
+ * condition several things share, and borrowing a type colour would read as "these became
+ * services". Amber for the span, because it is a caution rather than a fault; a colder red for
+ * the compensation path, which is where a failure has already happened.
+ */
+export const TRANSACTION_FRAME = '#d99a2b'
+export const ROLLBACK_FRAME = '#c2554a'
+
 export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 
@@ -25,6 +37,8 @@ export const ACCENT_COLORS: Record<string, string> = {
   abstract_class: '#94a3b8',
   service_provider: '#ca8a04',
   facade:     '#00BCD4',
+  ai_agent:   '#A3E635',
+  ai_tool:    '#65A30D',
   filament_panel:            '#7C3AED',
   filament_resource:         '#A855F7',
   filament_page:             '#C084FC',
@@ -58,6 +72,8 @@ export const ACCENT_COLORS_LIGHT: Record<string, string> = {
   abstract_class: '#64748b',
   service_provider: '#a16207',
   facade:     '#00838f',
+  ai_agent:   '#4d7c0f',
+  ai_tool:    '#3f6212',
   filament_panel:            '#5b21b6',
   filament_resource:         '#7e22ce',
   filament_page:             '#9333ea',
@@ -91,6 +107,8 @@ export const BG_COLORS: Record<string, string> = {
   abstract_class: '#0f172a',
   service_provider: '#422006',
   facade:     '#001F28',
+  ai_agent:   '#131A08',
+  ai_tool:    '#101705',
   filament_panel:            '#150C2A',
   filament_resource:         '#1A0C26',
   filament_page:             '#1E0F2E',
@@ -124,6 +142,8 @@ export const BG_COLORS_LIGHT: Record<string, string> = {
   abstract_class: '#f1f5f9',
   service_provider: '#fef9c3',
   facade:     '#e0f7fa',
+  ai_agent:   '#f7fee7',
+  ai_tool:    '#ecfccb',
   filament_panel:            '#f5f3ff',
   filament_resource:         '#faf5ff',
   filament_page:             '#fdf4ff',

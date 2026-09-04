@@ -1,5 +1,5 @@
 import type { GraphNode } from '../types/graph'
-import { ACCENT_COLORS } from '../utils/graphConstants'
+import { ACCENT_COLORS, TRANSACTION_FRAME } from '../utils/graphConstants'
 import { Tooltip } from './Tooltip'
 
 const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
@@ -26,6 +26,8 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   abstract_class: 'Abstract',
   service_provider: 'Providers',
   facade: 'Facades',
+  ai_agent: 'AI Agents',
+  ai_tool: 'AI Tools',
   filament_panel: 'F. Panels',
   filament_resource: 'F. Resources',
   filament_page: 'F. Pages',
@@ -39,9 +41,20 @@ const ORDER: GraphNode['type'][] = [
   'route', 'middleware', 'controller', 'livewire_component', 'action', 'service',
   'validation_request', 'model', 'event', 'listener', 'job', 'command', 'channel', 'schedule',
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
-  'service_provider', 'facade', 'filament_panel', 'filament_resource', 'filament_page',
+  'service_provider', 'facade', 'ai_agent', 'ai_tool',
+  'filament_panel', 'filament_resource', 'filament_page',
   'filament_page_method', 'filament_widget', 'filament_relation_manager',
 ]
+
+/**
+ * Listed last, and not a node type.
+ *
+ * A transaction is a region drawn around nodes rather than a node, so it has no entry in
+ * `GraphNode['type']` and its count is a number of spans, not of nodes. It belongs in this list
+ * anyway: from the reader's side the question is the same one every other row answers — is this
+ * drawn on the graph, and can I turn it off.
+ */
+const REGION_TYPE = 'transaction'
 
 interface Props {
   visibleTypes: Set<string>
@@ -52,7 +65,9 @@ interface Props {
 }
 
 export function FilterPanel({ visibleTypes, counts, onToggle, onShowAll, onHideAll }: Props) {
-  const present = ORDER.filter((t) => (counts[t] ?? 0) > 0)
+  const present: string[] = ORDER.filter((t) => (counts[t] ?? 0) > 0)
+
+  if ((counts[REGION_TYPE] ?? 0) > 0) present.push(REGION_TYPE)
 
   return (
     <div className="show-graph">
@@ -68,16 +83,23 @@ export function FilterPanel({ visibleTypes, counts, onToggle, onShowAll, onHideA
         {present.map((type) => {
           const count = counts[type] ?? 0
           const checked = visibleTypes.has(type)
-          const color = ACCENT_COLORS[type] ?? '#94a3b8'
+          const color = type === REGION_TYPE
+            ? TRANSACTION_FRAME
+            : ACCENT_COLORS[type] ?? '#94a3b8'
+          const label = type === REGION_TYPE
+            ? 'Transactions'
+            : TYPE_LABELS[type as GraphNode['type']] ?? type
           return (
-            <Tooltip key={type} content={`${checked ? 'Hide' : 'Show'} ${TYPE_LABELS[type] ?? type} nodes`}>
+            <Tooltip key={type} content={type === REGION_TYPE
+              ? `${checked ? 'Hide' : 'Show'} the boundary drawn around work that runs in one transaction`
+              : `${checked ? 'Hide' : 'Show'} ${label} nodes`}>
               <button
                 type="button"
                 className={`show-graph-item ${!checked ? 'show-graph-item--off' : ''}`}
                 onClick={() => onToggle(type)}
               >
                 <span className="show-graph-dot" style={{ backgroundColor: color }} />
-                <span className="show-graph-label">{TYPE_LABELS[type] ?? type}</span>
+                <span className="show-graph-label">{label}</span>
                 <span className="show-graph-count">{count}</span>
               </button>
             </Tooltip>

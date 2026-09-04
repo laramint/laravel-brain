@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace LaraMint\LaravelBrain\Graph;
 
 use Illuminate\Support\Str;
+use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
+use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
+use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
+use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
 use LaraMint\LaravelBrain\Analysis\ConsoleCommandDefinition;
@@ -20,6 +24,7 @@ use LaraMint\LaravelBrain\Analysis\FilamentRelationManagerDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentWidgetDefinition;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
+use LaraMint\LaravelBrain\Analysis\JobAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
@@ -48,6 +53,8 @@ class GraphBuilder
     private array $edgeIdOccurrence = [];
 
     private FlowExtractor $flowExtractor;
+
+    private ?JobAnalyzer $jobAnalyzer = null;
 
     private PhpFileParser $parser;
 
@@ -106,6 +113,9 @@ class GraphBuilder
     /** @var string[] class-file search roots, relative to the project root */
     private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
 
+    /** Whether cache operations are detected and attached at all — see setCacheOperationsEnabled(). */
+    private bool $cacheOperationsEnabled = true;
+
     private ?ContainerBindingRegistry $bindingRegistry = null;
 
     private ?FacadeRegistry $facadeRegistry = null;
@@ -157,6 +167,19 @@ class GraphBuilder
     }
 
     /**
+     * Turn cache-operation detection on or off for the whole build.
+     *
+     * Off is off at the source: FlowExtractor drops its detector, so no statement is inspected
+     * for a cache call and the pass below has nothing to walk. It is not a filter over results
+     * that were computed anyway — a project that does not want the feature pays nothing for it.
+     */
+    public function setCacheOperationsEnabled(bool $enabled): void
+    {
+        $this->cacheOperationsEnabled = $enabled;
+        $this->flowExtractor->setCacheOperationsEnabled($enabled);
+    }
+
+    /**
      * The directories searched by file name when the PSR-4 map cannot place a class.
      *
      * @param  string[]  $paths  relative to the project root; glob patterns are expanded
@@ -201,6 +224,14 @@ class GraphBuilder
      * Memoized for the build: the answer depends only on the FQCN, the PSR-4 map and the
      * project root, all fixed once buildGraph() starts.
      */
+    /**
+     * Built on first use: most graphs contain no job at all, and the parser it holds is not free.
+     */
+    private function getJobAnalyzer(): JobAnalyzer
+    {
+        return $this->jobAnalyzer ??= new JobAnalyzer;
+    }
+
     private function resolveFile(string $fqcn): string
     {
         return $this->resolveFileMemo[$fqcn] ??= $this->resolveFileUncached($fqcn);
@@ -599,9 +630,27 @@ class GraphBuilder
             $edgeType = 'action-to-'.$calleeGraphType;
 
             $this->addEdge($callerNode, $calleeNode, $edgeLabel, $edgeType);
+
+            // A transaction is a span, not a step, so it is recorded as something true OF the
+            // work rather than as a node in the path. The callee is what runs inside; the caller
+            // is what opened it and generally outlives it.
+            if ($edge->inTransaction || $edge->inRollback) {
+                $this->recordSpanState($calleeNode, $edge->transactionId, $edge->inTransaction, $edge->inRollback);
+            }
+
             $this->maybeWireContainerBinding($edge, $models);
             $this->maybeWireFacadeResolution($edge, $models);
         }
+
+        foreach (array_keys($this->transactionOpeners) as $key) {
+            [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
+            $nodeId = $this->nodeIdForHop($fqcn, $method);
+            // The opener belongs to the first span it opens, which is the one a reader sees it
+            // wrapped in when the method holds only one — the ordinary case.
+            $this->recordSpanState($nodeId, $key.'#0', inTransaction: true, inRollback: false);
+        }
+
+        $this->stampTransactionScopes();
 
         $this->supplementEnumAndInterfaceNodes($controllers, $callChain);
         $this->wireControllerInterfaceHints($routes, $controllers);
@@ -649,7 +698,73 @@ class GraphBuilder
             }
         }
 
+        // ── 5. Cache-operation pass ───────────────────────────────────────────
+        //
+        // Read back off the flow steps instead of re-walking the ASTs: FlowExtractor has already
+        // resolved the facade alias and the key for every call it charted, and every node with a
+        // method behind it carries flowSteps. One pass here therefore covers the twenty-odd sites
+        // that build such a node, where doing it at creation time would mean twenty-odd copies of
+        // the same three lines — and would silently miss whatever node type is added next.
+        //
+        // Scope is deliberately the node's own body, unlike dbQueries, which follow the call
+        // chain: a cache operation belongs to the method that performs it. Attributing a
+        // service's `Cache::forget()` upwards to every action above it would put the same key on
+        // a dozen panels and lose the one method actually responsible for clearing it — and the
+        // graph edges already lead there.
+        if ($this->cacheOperationsEnabled) {
+            foreach ($this->graph->nodes() as $node) {
+                $steps = $node->data['flowSteps'] ?? null;
+                if (! is_array($steps) || $steps === []) {
+                    continue;
+                }
+
+                $cacheOps = $this->collectCacheOps($steps);
+                if ($cacheOps !== []) {
+                    $this->graph->updateNodeData($node->id, array_merge($node->data, ['cacheOps' => $cacheOps]));
+                }
+            }
+        }
+
         return $this->graph;
+    }
+
+    /**
+     * Every distinct cache operation a flow performs, in the order the source performs them.
+     *
+     * @param  array[]  $steps
+     * @return array[]
+     */
+    private function collectCacheOps(array $steps): array
+    {
+        $found = [];
+        $this->gatherCacheOps($steps, $found);
+
+        return array_values($found);
+    }
+
+    /**
+     * @param  array[]  $steps
+     * @param  array<string, array>  $found  signature => operation, so a key read twice is one row
+     */
+    private function gatherCacheOps(array $steps, array &$found): void
+    {
+        foreach ($steps as $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+
+            if (isset($step['cache']) && is_array($step['cache'])) {
+                $found[CacheOperation::signatureOf($step['cache'])] ??= $step['cache'];
+            }
+
+            // A cache call inside a branch or a callback is still a cache call this method makes;
+            // the N+1 pass walks the same three keys for the same reason.
+            foreach (['then', 'else', 'body'] as $branch) {
+                if (isset($step[$branch]) && is_array($step[$branch])) {
+                    $this->gatherCacheOps($step[$branch], $found);
+                }
+            }
+        }
     }
 
     // ── Node creation helpers ─────────────────────────────────────────────────
@@ -798,12 +913,17 @@ class GraphBuilder
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
                 $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                // What the job promises when it goes wrong. The node carried its name, its file
+                // and its flow, so "this runs on a queue" was the whole story — not whether a
+                // failure is retried, nor whether a second dispatch is dropped.
+                $jobFacts = $this->getJobAnalyzer()->describe($fqcn, $file);
                 $this->graph->addNode(new Node($id, 'job', $method ? "{$short}@{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'file' => $file,
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
+                    ...($jobFacts === null ? [] : ['job' => $jobFacts->toArray()]),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
                 ]));
                 break;
@@ -2196,6 +2316,87 @@ class GraphBuilder
         return array_unique($resolved);
     }
 
+    /**
+     * Methods that open a transaction, keyed `Fqcn::method`, as reported by the tracer.
+     *
+     * @var array<string, true>
+     */
+    private array $transactionOpeners = [];
+
+    /** @param array<string, true> $openers */
+    public function setTransactionOpeners(array $openers): void
+    {
+        $this->transactionOpeners = $openers;
+    }
+
+    /**
+     * Which span each node sits in, and what is true of the node WITHIN that span.
+     *
+     * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
+     * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
+     * which draws one.
+     *
+     * The three facts are kept together on purpose. A node can be reached from more than one
+     * span — a service called both inside a transaction and from a catch block that rolls one
+     * back — and recording them apart let the id come from the first span while the rollback
+     * flag came from any span at all. The node then drew inside region A wearing region B's
+     * marking: shown as a rollback member of a transaction it never rolled back.
+     *
+     * @var array<string, array{id: string|null, inTransaction: bool, inRollback: bool}>
+     */
+    private array $spanStateByNode = [];
+
+    /**
+     * Bind a node to the first span that reached it, flags and identity together.
+     *
+     * First one wins, which is what the identity did before this and is the honest choice while
+     * a node carries one region: a later span cannot be shown, so silently replacing the earlier
+     * one would only change which of two answers is hidden.
+     */
+    private function recordSpanState(string $nodeId, ?string $spanId, bool $inTransaction, bool $inRollback): void
+    {
+        $this->spanStateByNode[$nodeId] ??= [
+            'id' => $spanId,
+            'inTransaction' => $inTransaction,
+            'inRollback' => $inRollback,
+        ];
+    }
+
+    /**
+     * Write the two flags onto the nodes that earned them.
+     *
+     * Done in one pass after the chain is walked rather than as each edge is seen, because a
+     * node can be reached by several calls and the last write would otherwise decide: one call
+     * from inside a transaction is enough to make the flag true, and a later call from outside
+     * must not clear it.
+     */
+    private function stampTransactionScopes(): void
+    {
+        foreach ($this->spanStateByNode as $id => $state) {
+            $node = $this->graph->getNode($id);
+
+            if ($node === null) {
+                continue;
+            }
+
+            $data = $node->data;
+
+            if ($state['inTransaction']) {
+                $data['inTransaction'] = true;
+            }
+
+            if ($state['inRollback']) {
+                $data['inRollback'] = true;
+            }
+
+            if ($state['id'] !== null) {
+                $data['transactionId'] = $state['id'];
+            }
+
+            $this->graph->updateNodeData($id, $data);
+        }
+    }
+
     private function addEdge(string $source, string $target, string $label, string $type): void
     {
         // Prevent edges to/from non-existent nodes (safety guard)
@@ -2676,6 +2877,174 @@ class GraphBuilder
                 $this->addEdge($resourceId, $this->filamentRelationManagerId($rmFqcn), 'has relation', 'filament-resource-to-relation');
             }
         }
+    }
+
+    // ── laravel/ai agents and tools ───────────────────────────────────────────
+
+    private function aiAgentId(string $fqcn): string
+    {
+        return "ai_agent::{$fqcn}";
+    }
+
+    private function aiToolId(string $fqcn): string
+    {
+        return "ai_tool::{$fqcn}";
+    }
+
+    /**
+     * Put the application's LLM calls on the graph: one node per agent, one per tool, an edge
+     * from each agent to every tool it hands the model, and an edge from each method that names
+     * an agent to that agent.
+     *
+     * Must run after the Filament pass. A caller node is looked up rather than created — an
+     * agent prompted from a Filament page method lives under a filament_page_method id, which
+     * only exists once that pass has run, and looking for it first is the difference between
+     * that edge appearing and being dropped by {@see addEdge}'s missing-node guard.
+     *
+     * @param  AiAgentDefinition[]  $agents
+     * @param  AiToolDefinition[]  $tools
+     * @param  AiAgentCallSite[]  $callSites
+     */
+    public function addAi(array $agents, array $tools, array $callSites): void
+    {
+        foreach ($tools as $tool) {
+            $id = $this->aiToolId($tool->fqcn);
+            if (! $this->graph->hasNode($id)) {
+                $this->graph->addNode(new Node($id, 'ai_tool', class_basename($tool->fqcn), [
+                    'fqcn' => $tool->fqcn,
+                    'file' => $tool->file,
+                    'toolKind' => $tool->kind,
+                    ...($tool->description !== '' ? ['description' => $tool->description] : []),
+                ]));
+            }
+        }
+
+        foreach ($agents as $agent) {
+            $id = $this->aiAgentId($agent->fqcn);
+            if (! $this->graph->hasNode($id)) {
+                $this->graph->addNode(new Node($id, 'ai_agent', class_basename($agent->fqcn), [
+                    'fqcn' => $agent->fqcn,
+                    'file' => $agent->file,
+                    'contracts' => $agent->contracts,
+                    'modelSource' => $agent->modelSource,
+                    'providerSource' => $agent->providerSource,
+                    'methodOverrides' => $agent->methodOverrides,
+                    ...($agent->model !== null ? ['model' => $agent->model] : []),
+                    ...($agent->modelTier !== null ? ['modelTier' => $agent->modelTier] : []),
+                    ...($agent->shadowedModelAttribute !== null ? ['shadowedModelAttribute' => $agent->shadowedModelAttribute] : []),
+                    ...($agent->provider !== null ? ['provider' => $agent->provider] : []),
+                    ...($agent->shadowedProviderAttribute !== null ? ['shadowedProviderAttribute' => $agent->shadowedProviderAttribute] : []),
+                    ...($agent->maxSteps !== null ? ['maxSteps' => $agent->maxSteps] : []),
+                    ...($agent->maxTokens !== null ? ['maxTokens' => $agent->maxTokens] : []),
+                    ...($agent->temperature !== null ? ['temperature' => $agent->temperature] : []),
+                    ...($agent->topP !== null ? ['topP' => $agent->topP] : []),
+                    ...($agent->timeout !== null ? ['timeout' => $agent->timeout] : []),
+                    ...($agent->strict ? ['strict' => true] : []),
+                    ...($agent->repairToolCalls ? ['repairToolCalls' => true] : []),
+                    ...($agent->withoutBroadcasting ? ['withoutBroadcasting' => true] : []),
+                    ...($agent->unresolvedTools !== [] ? ['unresolvedTools' => $agent->unresolvedTools] : []),
+                    ...($agent->injectedTools !== [] ? ['injectedTools' => $agent->injectedTools] : []),
+                    ...($agent->toolsAreDynamic ? ['toolsDecidedAtRuntime' => true] : []),
+                    ...($this->aiUnwiredTools($agent) !== [] ? ['unwiredTools' => $this->aiUnwiredTools($agent)] : []),
+                ]));
+            }
+        }
+
+        foreach ($agents as $agent) {
+            if (! $agent->declaresHasTools) {
+                continue;
+            }
+
+            $agentId = $this->aiAgentId($agent->fqcn);
+
+            foreach ($agent->tools as $toolFqcn) {
+                $this->addEdge($agentId, $this->aiToolId($toolFqcn), 'may call', 'ai-agent-to-tool');
+            }
+
+            // Tools the agent could not name itself but was handed where it is built. Labelled
+            // apart from the declared ones, because the two are known with different certainty.
+            foreach ($agent->injectedTools as $toolFqcn) {
+                $this->addEdge($agentId, $this->aiToolId($toolFqcn), 'may call (supplied)', 'ai-agent-to-tool');
+            }
+
+            // An agent returned from tools() is wrapped in the SDK's AgentTool, so the model can
+            // call it exactly as it calls a tool — a delegation, drawn agent to agent.
+            foreach ($agent->toolAgents as $delegateFqcn) {
+                $this->addEdge($agentId, $this->aiAgentId($delegateFqcn), 'delegates to', 'ai-agent-to-agent');
+            }
+        }
+
+        foreach ($callSites as $site) {
+            $callerId = $this->aiCallerNodeId($site->callerFqcn, $site->callerMethod);
+            if ($callerId === null) {
+                continue;
+            }
+            $this->addEdge($callerId, $this->aiAgentId($site->agentFqcn), 'prompts', 'ai-caller-to-agent');
+        }
+    }
+
+    /**
+     * Tools an agent returns from tools() that the model will never be offered.
+     *
+     * `GeneratesText::resolveTools()` opens with `if (! $agent instanceof HasTools) return [];`,
+     * so a tools() method on a class that forgot the contract is dead code — verified against
+     * v0.11.0. Drawing "may call" edges for those would put a capability on the graph that the
+     * model does not have, so they are listed on the node instead of wired.
+     *
+     * @return list<string>
+     */
+    private function aiUnwiredTools(AiAgentDefinition $agent): array
+    {
+        if ($agent->declaresHasTools) {
+            return [];
+        }
+
+        return array_values(array_merge(
+            $agent->tools,
+            $agent->injectedTools,
+            $agent->toolAgents,
+            $agent->unresolvedTools,
+        ));
+    }
+
+    /**
+     * The graph node standing for "this method of this class", created if no pass made one.
+     *
+     * Looking the node up and giving up when it is missing was the first version of this, and it
+     * produced no caller edges at all on a real application: measured on a 2,544-node graph with
+     * 5 agents and 17 tools, all six call sites resolved to classes — a queued job, two services,
+     * a listener helper — that the call-chain tracer never reached from any route, so not one of
+     * them had a node to attach to and all 22 AI nodes were left isolated.
+     *
+     * So the node is created when it is absent, classified exactly as the tracer would have
+     * classified it, which is what addFilament() already does for a resource's model. The class
+     * is on the graph because it talks to an LLM; that is a fact about it worth a node, whether
+     * or not anything else in the project reaches it.
+     */
+    private function aiCallerNodeId(string $fqcn, string $method): ?string
+    {
+        if ($fqcn === '' || $method === '') {
+            return null;
+        }
+
+        $candidates = [
+            $this->nodeIdForHop($fqcn, $method),
+            $this->filamentPageMethodId($fqcn, $method),
+            $this->actionId($fqcn, $method),
+            $this->controllerId($fqcn),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if ($this->graph->hasNode($candidate)) {
+                return $candidate;
+            }
+        }
+
+        $this->ensureNode($fqcn, $method, $this->effectiveCalleeGraphType($fqcn, $this->classifyFqcn($fqcn)), []);
+
+        $created = $this->nodeIdForHop($fqcn, $method);
+
+        return $this->graph->hasNode($created) ? $created : null;
     }
 }
 

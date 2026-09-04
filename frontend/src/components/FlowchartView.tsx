@@ -146,6 +146,19 @@ function FlowBox({ step }: { step: FlowStep }) {
     <div className={`${cls} flowchart-shape--${shape}`} title={step.label}>
       {icon && <span className="flowchart-icon">{icon}</span>}
       <span className="flowchart-label">{step.label}</span>
+      {/*
+        A cache badge rides on the step whatever its type ended up as. `Cache::remember(…, fn)`
+        is re-typed to `loop` so the chart can descend into the closure, and a returned cache
+        read stays a `return`; in both, the colour alone would not say the cache was involved.
+      */}
+      {step.cache && (
+        <span
+          className={`flowchart-cache-badge flowchart-cache-badge--${step.cache.kind}`}
+          title={cacheBadgeTitle(step)}
+        >
+          {step.cache.kind}
+        </span>
+      )}
       {step.n1 && (
         <span className="flowchart-n1-warn" title="N+1 Query Detected: This database operation is inside a loop!">
           ⚠️ N+1
@@ -153,6 +166,23 @@ function FlowBox({ step }: { step: FlowStep }) {
       )}
     </div>
   )
+}
+
+/** The full detail of a cache step, for the hover the badge itself has no room for. */
+function cacheBadgeTitle(step: FlowStep): string {
+  const op = step.cache
+  if (!op) return ''
+
+  const key = op.keyKind === 'computed' ? 'computed key'
+    : op.keyKind === 'none' ? 'whole store'
+    : `"${op.key}"`
+  const extras = [
+    op.ttl !== null ? `ttl ${op.ttl}s` : '',
+    op.store !== '' ? `store ${op.store}` : '',
+    op.tags.length > 0 ? `tags ${op.tags.join(', ')}` : '',
+  ].filter(Boolean)
+
+  return `${op.kind} · ${op.method} ${key}${extras.length > 0 ? ` · ${extras.join(' · ')}` : ''}`
 }
 
 function FlowArrow() {
@@ -173,4 +203,5 @@ const STEP_ICONS: Record<string, string> = {
   loop:     '↻',
   dispatch: '⚡',
   event:    '📡',
+  cache:    '⛃',
 }
