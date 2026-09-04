@@ -14,7 +14,7 @@ import { membershipsOf } from './utils/graphRegions'
 import './App.css'
 
 const ALL_TYPES: GraphNode['type'][] = [
-  'route', 'middleware', 'controller', 'livewire_component', 'action', 'service', 'validation_request', 'model', 'event', 'listener', 'job',
+  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service', 'validation_request', 'model', 'event', 'listener', 'job',
   'command', 'channel', 'schedule',
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
   'ai_agent', 'ai_tool',

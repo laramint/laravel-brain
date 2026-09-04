@@ -7,7 +7,11 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   middleware: 'Middleware',
   controller: 'Controllers',
   livewire_component: 'Livewire',
-  action: 'Actions',
+  // "Action" unqualified means the Actions/ class pattern in ordinary Laravel usage, so the
+  // unqualified label belongs to that kind. The controller method is precisely a controller
+  // action, and saying so is what keeps two adjacent legend rows from differing by one word.
+  action: 'Controller actions',
+  action_class: 'Actions',
   service: 'Services',
   validation_request: 'Validation',
   model: 'Models',
@@ -38,7 +42,7 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
 
 // Stable order matching App.tsx ALL_TYPES
 const ORDER: GraphNode['type'][] = [
-  'route', 'middleware', 'controller', 'livewire_component', 'action', 'service',
+  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service',
   'validation_request', 'model', 'event', 'listener', 'job', 'command', 'channel', 'schedule',
   'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
   'service_provider', 'facade', 'ai_agent', 'ai_tool',

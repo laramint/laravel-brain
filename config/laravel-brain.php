@@ -292,6 +292,47 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Action Class Search Paths
+    // -------------------------------------------------------------------------
+    // Directories (relative to the project root) holding single-purpose "action"
+    // classes — one class, one public entry method (__invoke / handle / execute),
+    // performing one deliberate unit of work. Classes found here are drawn as their
+    // own kind rather than as generic services, so an application's units of work
+    // read apart from its incidental collaborators.
+    //
+    // Placement is the signal, because the pattern has no naming convention to key
+    // on: the classes are named for verbs (CreateOrder, PublishPost), and a *Action
+    // suffix test would miss every one of those while claiming every Filament table
+    // action. The directory is what the generators write and what makes the group
+    // legible, so it is what is matched — the same way listeners and observers are
+    // already discovered.
+    //
+    // An entry is used as-is when it is a directory and expanded as a glob pattern
+    // otherwise, so an application whose code lives in packages says:
+    //
+    //   'paths' => ['app-modules/*/src/Actions'],
+    //
+    // Reclassification is conservative and one-way: only a class that nothing more
+    // specific already recognised becomes an action class. A job, listener, model,
+    // event, facade or Form Request sitting under one of these directories keeps the
+    // kind that recognised it.
+    //
+    // Turn the kind off with 'enabled' => false; nothing is then classified, and no
+    // directory is resolved or tested. An empty 'paths' array reaches the same result
+    // by a different route — no root to match, so nothing matches — but 'enabled' is
+    // the one to reach for, because it says so rather than leaving it to be inferred.
+    //
+    // Override via the LARAVEL_BRAIN_ACTIONS_ENABLED env variable.
+    //
+    'actions' => [
+        'enabled' => env('LARAVEL_BRAIN_ACTIONS_ENABLED', true),
+
+        'paths' => [
+            'app/Actions',
+        ],
+    ],
+
+    // -------------------------------------------------------------------------
     // Model Observers
     // -------------------------------------------------------------------------
     // Model → observer edges are discovered from every registration form:

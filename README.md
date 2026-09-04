@@ -45,6 +45,7 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Per-route tabs** — Each route gets its own isolated subgraph tab
 - **Middleware mapping** — Shows which middleware guards each route
 - **Model relationships** — Displays `hasMany`, `belongsTo`, and other Eloquent relations
+- **Action recognition** — Draws single-purpose action classes (one class, one `__invoke`/`handle`/`execute`, filed under `Actions/`) as their own kind rather than as generic services, and surfaces the entry method they are invoked through
 - **Observer discovery** — Finds Eloquent observers (`#[ObservedBy]`, `Model::observe()`, or `booted()`) and links them to the models they observe
 - **Policy resolution** — Resolves each model's authorization policy (explicit map, `#[UsePolicy]` attribute, or naming convention) and links it in the graph
 - **View composition mapping** — Traces `@include`, `@extends`, `@component`, `@each`, and `<x-...>` components as view → view edges, so a shared partial shows every entry point it reaches
@@ -447,6 +448,42 @@ Agents are ordinary application classes, so the scan follows `source_paths` by d
 
 `enabled` is a second, independent switch: it answers "this application uses the SDK and I still do not want it on the graph", which the string prefilter above cannot. Turning it off skips the pass before the directory scan, so nothing is read and nothing is parsed.
 
+### Action Classes
+
+Single-purpose "action" classes — one class, one public entry method (`__invoke`, `handle` or
+`execute`), performing one deliberate unit of work — are drawn as their own node kind rather than
+as generic services, so an application's units of work read apart from its incidental
+collaborators. The node carries the entry method it is invoked through, and the edge that reaches
+it is labelled `runs`.
+
+Placement is the signal, because the pattern has no naming convention to key on: the classes are
+named for verbs (`CreateOrder`, `PublishPost`), so a `*Action` suffix test would miss every one of
+them while claiming every Filament table action. Point the config at wherever they live:
+
+```php
+'actions' => [
+    'enabled' => true,
+    'paths' => ['app/Actions'],
+    // Modular monolith:
+    // 'paths' => ['app-modules/*/src/Actions'],
+],
+```
+
+Reclassification is conservative and one-way: only a class that nothing more specific already
+recognised becomes an action class. A job, listener, model, event, facade or Form Request sitting
+under one of these directories keeps the kind that recognised it.
+
+Set `enabled` to `false` to turn the kind off; nothing is classified, and no directory is resolved
+or tested. An empty `paths` array reaches the same result by a different route — no root to match,
+so nothing matches — and unlike the source and view paths an empty array here is honoured rather
+than replaced by the default. Prefer `enabled`: it says what it means instead of leaving it to be
+inferred.
+
+The node type is `action_class`, which is distinct from the long-standing `action` — the graph's
+name for a *controller action*. The two are unrelated and neither affects the other. Because
+"an Action" unqualified means this pattern in ordinary Laravel usage, the interface gives the
+unqualified label to `action_class` and calls `action` a **Controller action**.
+
 ## Graph Node Types
 
 | Node | Accent Color | Represents |
@@ -454,7 +491,8 @@ Agents are ordinary application classes, so the scan follows `source_paths` by d
 | Route | Green `#4CAF50` | HTTP endpoint (`GET /users`) |
 | Middleware | Orange `#FF9800` | Middleware applied to a route |
 | Controller | Blue `#2196F3` | Controller class |
-| Action | Light Blue `#03A9F4` | Controller method |
+| Controller action | Light Blue `#03A9F4` | Controller method (node type `action`) |
+| Action | Lime `#84cc16` | Single-purpose action class under `Actions/` (node type `action_class`) |
 | Service | Purple `#9C27B0` | Service or helper class |
 | Model | Red `#F44336` | Eloquent model |
 | Event | Yellow `#FFD600` | Laravel event |

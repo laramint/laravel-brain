@@ -11,7 +11,7 @@ class ContextExporter
     private const CHARS_PER_TOKEN = 4;
 
     private const TYPE_PRIORITY = [
-        'route', 'controller', 'action', 'validation_request', 'service',
+        'route', 'controller', 'action', 'validation_request', 'action_class', 'service',
         'model', 'event', 'job', 'command', 'channel', 'schedule', 'middleware',
         'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
         'ai_agent', 'ai_tool',
