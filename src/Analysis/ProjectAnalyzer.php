@@ -166,7 +166,10 @@ class ProjectAnalyzer
             (bool) config('laravel-brain.transactions.enabled', true),
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
-        $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
+        $this->modelAnalyzer = new ModelAnalyzer(
+            is_array($modelPaths) ? $modelPaths : [],
+            MorphMap::fromApplication(enabled: (bool) config('laravel-brain.morph_map.enabled', true)),
+        );
         $filamentPanelPaths = config('laravel-brain.filament.panel_paths', FilamentAnalyzer::DEFAULT_PANEL_PATHS);
         $filamentPaths = config('laravel-brain.filament.paths', FilamentAnalyzer::DEFAULT_PATHS);
         $this->filamentAnalyzer = new FilamentAnalyzer(

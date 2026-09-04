@@ -950,6 +950,12 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                   <h3>Model Schema</h3>
                   <div className="prop-row"><span className="prop-key">table</span><span className="prop-value">{erd.table || '—'}</span></div>
                   <div className="prop-row"><span className="prop-key">primary key</span><span className="prop-value">{erd.primaryKey} ({erd.keyType})</span></div>
+                  {erd.morphAlias && (
+                    <div className="prop-row"><span className="prop-key">morph alias</span><span className="prop-value">{erd.morphAlias}</span></div>
+                  )}
+                  {!erd.morphAlias && erd.morphAliasMissing && (
+                    <div className="prop-row"><span className="prop-key">morph alias</span><span className="prop-value prop-value--warn">none — this app enforces a morph map</span></div>
+                  )}
                   <div className="prop-row"><span className="prop-key">timestamps</span><span className="prop-value">{erd.timestamps ? 'yes' : 'no'}</span></div>
                   <div className="prop-row"><span className="prop-key">soft deletes</span><span className="prop-value">{erd.softDeletes ? 'yes' : 'no'}</span></div>
                   {erd.fillable?.length > 0 && (

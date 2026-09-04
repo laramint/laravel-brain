@@ -602,6 +602,7 @@ body::before {
 }
 .prop-key { color: var(--dim); min-width: 80px; flex-shrink: 0; }
 .prop-value { color: var(--text); word-break: break-all; }
+.prop-value--warn { color: var(--warn); }
 
 .edge-row {
   display: flex;
