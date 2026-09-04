@@ -30,6 +30,8 @@ const TYPE_COLORS: Record<string, string> = {
   entry_point_group: '#0E7490',
   unreached_class:   '#94A3B8',
   unreached_group:   '#475569',
+  macro:       '#F59E0B',
+  macro_group: '#B45309',
   route:      '#4CAF50',
   middleware: '#FF9800',
   controller: '#2196F3',
@@ -351,6 +353,9 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'note' &&
       key !== 'unfollowableReferences' &&
       key !== 'broadcast' &&
+      key !== 'origin' &&
+      key !== 'mixin' &&
+      key !== 'registrar' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -1087,6 +1092,28 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {node.type === 'macro' && (
+                <div className="sidebar-section">
+                  <h3>Where this method comes from</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">adds to</span>
+                    <span className="prop-value">{String(node.data?.fqcn ?? '—')}</span>
+                  </div>
+                  <div className="prop-row">
+                    <span className="prop-key">registered by</span>
+                    <span className="prop-value">{String(node.data?.registrar ?? 'a file with no class')}</span>
+                  </div>
+                  <div className="prop-row">
+                    <span className="prop-key">how</span>
+                    <span className="prop-value">
+                      {node.data?.origin === 'mixin'
+                        ? `mixin of ${String(node.data?.mixin ?? '—')}`
+                        : 'macro(), one method at a time'}
+                    </span>
+                  </div>
                 </div>
               )}
 

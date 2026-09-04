@@ -1,0 +1,1 @@
+{ "name": "test/macros-project", "autoload": { "psr-4": { "App\\": "app/" } } }

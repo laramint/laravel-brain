@@ -209,6 +209,38 @@ class GraphSplitter
             );
         }
 
+        // ── Macros tab ────────────────────────────────────────────────────────
+        //
+        // Its own tab for the reason every declaration-based pass needs one: a macro hangs off a
+        // provider, and providers are not what tabs are seeded from, so the nodes would be built,
+        // correct, and in no tab anyone opens. Grown forward from the receiver groups, which is
+        // enough — a macro's own edges go to the class that declares it, and that is the one
+        // thing a reader following this actually wants next.
+        $macroSeeds = [];
+
+        foreach ($fullGraph->nodes() as $node) {
+            if ($node->type === 'macro_group') {
+                $macroSeeds[] = $node->id;
+            }
+        }
+
+        if ($macroSeeds !== []) {
+            $tabId = 'macros';
+            $subgraph = $this->extractSubgraphForward($fullGraph, $fwdAdj, $macroSeeds, $projectName, $analyzedAt);
+            $subgraphs[$tabId] = $subgraph;
+
+            $manifest[] = new TabManifestEntry(
+                id: $tabId,
+                label: 'Macros',
+                routeCount: count($macroSeeds),
+                nodeCount: $subgraph->nodeCount(),
+                edgeCount: $subgraph->edgeCount(),
+                file: ".graph-{$tabId}.json",
+                routeFile: '',
+                category: 'Macros',
+            );
+        }
+
         // ── Scheduled-task tabs ───────────────────────────────────────────────
         // One tab per scheduled task, the way commands and channels already work. A single
         // "Scheduled Tasks" tab put exactly one row in the sidebar's Schedules bucket however

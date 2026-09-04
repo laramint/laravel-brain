@@ -27,6 +27,7 @@ use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentWidgetDefinition;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
 use LaraMint\LaravelBrain\Analysis\JobAnalyzer;
+use LaraMint\LaravelBrain\Analysis\MacroDefinition;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
@@ -1523,6 +1524,94 @@ class GraphBuilder
             '→ '.$short.'::'.$method,
             'inherits-method',
         );
+    }
+
+    /**
+     * Draw the methods an application adds to classes that do not declare them.
+     *
+     * Grouped by receiver, because that is the question's shape: nobody wonders "what macros
+     * exist", they wonder "where did `$table->money()` come from" — and the receiver is the half
+     * of that they already have in front of them.
+     *
+     * The registering class gets an edge to each macro when it is a class the graph can name.
+     * That edge is the payoff: a macro is invisible precisely because the method and the file
+     * that creates it share nothing a reader can search for.
+     *
+     * @param  list<MacroDefinition>  $macros
+     */
+    public function addMacros(array $macros): void
+    {
+        $counts = [];
+
+        foreach ($macros as $macro) {
+            $counts[$macro->receiver] = ($counts[$macro->receiver] ?? 0) + 1;
+        }
+
+        foreach ($macros as $macro) {
+            $groupId = $this->macroGroupId($macro->receiver);
+
+            if (! $this->graph->hasNode($groupId)) {
+                $short = class_basename($macro->receiver);
+                $this->graph->addNode(new Node($groupId, 'macro_group', $short.' ('.$counts[$macro->receiver].')', [
+                    'fqcn' => $macro->receiver,
+                    'count' => $counts[$macro->receiver],
+                    // A receiver outside the application is the interesting case: it is the one
+                    // whose source a reader can open and still not find the method.
+                    'vendor' => ! str_starts_with($this->resolveFile($macro->receiver), rtrim($this->projectRoot, '/').'/app'),
+                ]));
+            }
+
+            $id = $this->macroId($macro->receiver, $macro->name);
+
+            if (! $this->graph->hasNode($id)) {
+                $this->graph->addNode(new Node($id, 'macro', class_basename($macro->receiver).'::'.$macro->name, [
+                    'fqcn' => $macro->receiver,
+                    'name' => $macro->name,
+                    'origin' => $macro->origin(),
+                    'mixin' => $macro->mixin,
+                    'registrar' => $macro->registrar,
+                    'file' => $macro->file,
+                    'line' => $macro->line,
+                ]));
+            }
+
+            $this->addEdge($groupId, $id, 'adds', 'macro-group-to-macro');
+
+            // Pointed FROM the macro, not at it. The tab is grown forward from the receiver
+            // groups, so an edge into the registrar is what carries it along; drawn the other way
+            // the class that creates the method sits outside the one tab that is about macros.
+            //
+            // The node is created when the graph has none: a provider that binds nothing into the
+            // container is not otherwise on the graph, and it is exactly the file a reader hunting
+            // this method needs to open.
+            if ($macro->registrar !== null) {
+                $registrarId = str_ends_with($macro->registrar, 'Provider')
+                    ? $this->ensureServiceProviderNode($macro->registrar)
+                    : $this->nodeIdForHop($macro->registrar, 'boot');
+
+                if ($this->graph->hasNode($registrarId)) {
+                    $this->addEdge($id, $registrarId, 'registered in', 'macro-to-registrar');
+                }
+            }
+
+            if ($macro->mixin !== null) {
+                $mixinId = $this->nodeIdForHop($macro->mixin, $macro->name);
+
+                if ($this->graph->hasNode($mixinId)) {
+                    $this->addEdge($id, $mixinId, 'declared in', 'macro-to-mixin');
+                }
+            }
+        }
+    }
+
+    private function macroId(string $receiver, string $name): string
+    {
+        return 'macro::'.strtolower(preg_replace('/[^a-zA-Z0-9_]/', '_', $receiver)).'::'.$name;
+    }
+
+    private function macroGroupId(string $receiver): string
+    {
+        return 'macro_group::'.strtolower(preg_replace('/[^a-zA-Z0-9_]/', '_', $receiver));
     }
 
     private function ensureServiceProviderNode(string $providerFqcn): string
