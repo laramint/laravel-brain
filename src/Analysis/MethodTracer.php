@@ -89,9 +89,14 @@ class MethodTracer
      * @param  string[]  $extraDispatchHelpers
      * @param  string[]  $sourcePaths  class-file search roots, relative to the project root
      */
+    /**
+     * @param  bool  $detectTransactions  read transaction spans while scanning; off skips the
+     *                                    traversal entirely rather than discarding its result
+     */
     public function __construct(
         array $extraDispatchHelpers = [],
         array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS,
+        private readonly bool $detectTransactions = true,
     ) {
         $this->sourcePaths = $sourcePaths;
         $this->parser = new PhpFileParser;
@@ -175,6 +180,9 @@ class MethodTracer
                 calleeMethod: $hop['method'],
                 type: $hop['type'],
                 visibility: $hop['visibility'],
+                inTransaction: $hop['inTransaction'] ?? false,
+                inRollback: $hop['inRollback'] ?? false,
+                transactionId: $hop['transactionId'] ?? null,
             );
 
             if (in_array($hop['type'], ['service', 'repository', 'action', 'mail', 'notification', 'abstract_class', 'resource'], true)) {
@@ -244,6 +252,9 @@ class MethodTracer
                         calleeMethod: $hop['method'],
                         type: $hop['type'],
                         visibility: $hop['visibility'],
+                        inTransaction: $hop['inTransaction'] ?? false,
+                        inRollback: $hop['inRollback'] ?? false,
+                        transactionId: $hop['transactionId'] ?? null,
                     );
 
                     // Recurse into non-leaf hops (services, repositories)
@@ -336,6 +347,9 @@ class MethodTracer
                 calleeMethod: $hop['method'],
                 type: $hop['type'],
                 visibility: $hop['visibility'],
+                inTransaction: $hop['inTransaction'] ?? false,
+                inRollback: $hop['inRollback'] ?? false,
+                transactionId: $hop['transactionId'] ?? null,
             );
 
             if (in_array($hop['type'], ['service', 'repository', 'action', 'mail', 'notification', 'abstract_class', 'resource'], true)) {
@@ -353,6 +367,13 @@ class MethodTracer
      * Scan a single method AST and return all discovered hops as raw arrays:
      *   [ ['fqcn'=>..., 'method'=>..., 'type'=>...], ... ]
      */
+    /**
+     * Methods that open a database transaction, keyed `Fqcn::method`.
+     *
+     * @var array<string, true>
+     */
+    public array $transactionOpeners = [];
+
     private function scanMethod(
         Node $ast,
         array $varTypeMap,
@@ -364,9 +385,23 @@ class MethodTracer
 
         $dispatchFunctions = array_values(array_unique(['dispatch', 'dispatch_sync', ...$this->extraDispatchHelpers]));
 
-        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions) extends NodeVisitorAbstract
+        // Built, or not built at all. The detector walks every method body it is handed, and an
+        // application with no transactions pays that walk to be told it has none — measured at
+        // +36% of the lifecycle phase on a corpus that contains not one `DB::transaction`.
+        $scopes = $this->detectTransactions ? TransactionScopes::in($ast) : TransactionScopes::none();
+
+        // The method that opens a span is part of it, and is the only part guaranteed to be
+        // visible: a transaction whose body calls nothing the tracer can resolve would otherwise
+        // leave no trace at all. Recorded against the method, not against what it happens to call.
+        if ($scopes->hasAny() && $ast instanceof Node\Stmt\ClassMethod) {
+            $this->transactionOpeners[$currentFqcn.'::'.$ast->name->toString()] = true;
+        }
+
+        $spanKey = $currentFqcn.'::'.($ast instanceof Node\Stmt\ClassMethod ? $ast->name->toString() : '__closure');
+
+        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey) extends NodeVisitorAbstract
         {
-            /** @var list<array{fqcn:string,method:string,type:string,visibility:string}> */
+            /** @var list<array{fqcn:string,method:string,type:string,visibility:string,inTransaction?:bool,inRollback?:bool,transactionId?:string|null}> */
             public array $hops = [];
 
             private array $varTypeMap;
@@ -393,7 +428,9 @@ class MethodTracer
                 string $currentFqcn,
                 ?string $parentFqcn,
                 private MethodTracer $tracer,
-                array $dispatchFunctions = ['dispatch', 'dispatch_sync'],
+                array $dispatchFunctions,
+                private TransactionScopes $scopes,
+                private string $spanKey = '',
             ) {
                 $this->varTypeMap = $varTypeMap;
                 $this->useMap = $useMap;
@@ -424,6 +461,8 @@ class MethodTracer
 
             public function enterNode(Node $node): ?int
             {
+                $before = count($this->hops);
+
                 if ($node instanceof Node\Expr\StaticCall) {
                     $this->handleStaticCall($node);
                 } elseif ($node instanceof Node\Expr\MethodCall) {
@@ -436,6 +475,24 @@ class MethodTracer
                     $this->handleAssign($node);
                 } elseif ($node instanceof Node\Expr\ClassConstFetch) {
                     $this->handleClassConstFetch($node);
+                }
+
+                // Whatever those handlers just recorded was recorded from THIS node, so its
+                // transaction scope is theirs. Stamped once here rather than at each of the
+                // two dozen places a hop is appended — one of which would eventually be added
+                // without the stamp, and nothing would say so.
+                $added = count($this->hops) - $before;
+
+                if ($added > 0) {
+                    $inTransaction = $this->scopes->isInTransaction($node);
+                    $inRollback = $this->scopes->isInRollback($node);
+                    $span = $this->scopes->spanIndex($node);
+
+                    for ($i = $before; $i < count($this->hops); $i++) {
+                        $this->hops[$i]['inTransaction'] = $inTransaction;
+                        $this->hops[$i]['inRollback'] = $inRollback;
+                        $this->hops[$i]['transactionId'] = $span === null ? null : $this->spanKey.'#'.$span;
+                    }
                 }
 
                 return null;

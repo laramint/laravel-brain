@@ -274,6 +274,29 @@ return [
     // So the graph shows which observer runs on a model's lifecycle events,
     // however it is wired.
     //
+    // -------------------------------------------------------------------------
+    // Database Transactions
+    // -------------------------------------------------------------------------
+    // Whether call chains are read for the transaction spans they run inside, so
+    // the canvas can draw a boundary around the work that commits or rolls back
+    // together.
+    //
+    // What it costs: the detector walks every method body the tracer scans, and
+    // it walks them whether or not the application opens a single transaction.
+    // Measured on a synthetic corpus containing no `DB::transaction` at all:
+    // +8.2% on a full 1,185-file scan, of which the lifecycle phase is +36%.
+    // That is the price of being told there is nothing to draw; an application
+    // that does use transactions pays it plus the real work.
+    //
+    // Turning it off skips the traversal rather than discarding its result, so
+    // off costs nothing at all.
+    //
+    // Override via the LARAVEL_BRAIN_TRANSACTIONS_ENABLED env variable.
+    //
+    'transactions' => [
+        'enabled' => env('LARAVEL_BRAIN_TRANSACTIONS_ENABLED', true),
+    ],
+
     'observers' => [
         'model_paths' => [
             'app/Models',
