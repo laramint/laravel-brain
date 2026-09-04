@@ -289,6 +289,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'schema' &&
       key !== 'event' &&
       key !== 'listener' &&
+      key !== 'job' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -297,6 +298,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const tableSchema = node.data?.schema as import('../types/graph').TableSchemaData | undefined
   const event = node.data?.event as import('../types/graph').EventNodeData | undefined
   const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
+  const job = node.data?.job as import('../types/graph').JobNodeData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -742,6 +744,51 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       <span className="prop-value">
                         {listener.deferred ? 'yes (queue after_commit)' : 'no'}
                       </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {job && (
+                <div className="sidebar-section">
+                  <h3>Queue behaviour</h3>
+                  {job.tries !== null && (
+                    <div className="prop-row"><span className="prop-key">attempts</span><span className="prop-value">{job.tries}</span></div>
+                  )}
+                  {job.timeout !== null && (
+                    <div className="prop-row"><span className="prop-key">timeout</span><span className="prop-value">{job.timeout}s</span></div>
+                  )}
+                  {job.backoff !== null && (
+                    <div className="prop-row"><span className="prop-key">backoff</span><span className="prop-value">{job.backoff}s</span></div>
+                  )}
+                  {job.maxExceptions !== null && (
+                    <div className="prop-row"><span className="prop-key">max exceptions</span><span className="prop-value">{job.maxExceptions}</span></div>
+                  )}
+                  {job.unique && (
+                    <div className="prop-row">
+                      <span className="prop-key">unique</span>
+                      <span className="prop-value">
+                        {job.uniqueUntilProcessing ? 'until it starts processing' : 'while it is queued or running'}
+                        {job.uniqueFor !== null ? ` \u00b7 ${job.uniqueFor}s` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {job.batchable && (
+                    <div className="prop-row"><span className="prop-key">batch</span><span className="prop-value">runs as part of one</span></div>
+                  )}
+                  {job.afterCommit && (
+                    <div className="prop-row"><span className="prop-key">dispatch</span><span className="prop-value">after the transaction commits</span></div>
+                  )}
+                  {job.encrypted && (
+                    <div className="prop-row"><span className="prop-key">payload</span><span className="prop-value">encrypted</span></div>
+                  )}
+                  {job.middleware.length > 0 && (
+                    <div className="prop-row"><span className="prop-key">middleware</span><span className="prop-value">{job.middleware.join(', ')}</span></div>
+                  )}
+                  {job.dynamic.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">decided at runtime</span>
+                      <span className="prop-value">{job.dynamic.map((d) => `${d}()`).join(', ')}</span>
                     </div>
                   )}
                 </div>

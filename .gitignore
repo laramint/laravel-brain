@@ -7,4 +7,5 @@ public/index.html
 .claude/
 .idea/
 docs/.vitepress/cache/
-docs/.vitepress/dist/.DS_Store
+docs/.vitepress/dist/
+.DS_Store
