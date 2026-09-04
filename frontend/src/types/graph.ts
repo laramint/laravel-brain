@@ -5,13 +5,34 @@ export interface DbQuery {
   operation: string
 }
 
+/** What a cache call does to cache state. `read` covers `remember`, which writes only on a miss. */
+export type CacheOperationKind = 'read' | 'write' | 'invalidate' | 'lock'
+
+/** How far `CacheOperation.key` can be trusted; `computed` and `none` both leave it empty. */
+export type CacheKeyKind = 'literal' | 'constructed' | 'computed' | 'none'
+
+export interface CacheOperation {
+  kind: CacheOperationKind
+  /** The cache method as written — `remember`, `forget`, `pull`, or `cache` for the helper. */
+  method: string
+  key: string
+  keyKind: CacheKeyKind
+  /** A literal `store()`/`driver()` name, '' for the default store. */
+  store: string
+  tags: string[]
+  /** A literal TTL in seconds; null when absent or not readable from source. */
+  ttl: number | null
+}
+
 export interface FlowStep {
-  type: 'call' | 'assign' | 'return' | 'throw' | 'if' | 'loop' | 'dispatch' | 'event'
+  type: 'call' | 'assign' | 'return' | 'throw' | 'if' | 'loop' | 'dispatch' | 'event' | 'cache'
   label: string
   then?: FlowStep[]
   else?: FlowStep[]
   body?: FlowStep[]
   n1?: boolean
+  /** Present on any step whose expression talks to the cache, whatever its `type` ended up as. */
+  cache?: CacheOperation
 }
 
 export interface GraphMeta {
@@ -30,7 +51,7 @@ export interface GraphNodeMetrics {
 
 export interface GraphNode {
   id: string
-  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'listener' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager'
+  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'listener' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager' | 'ai_agent' | 'ai_tool'
   label: string
   data: Record<string, unknown>
 }
@@ -93,6 +114,10 @@ export interface ErdModelData {
   appends: string[]
   accessors: string[]
   relationships: { type: string; related: string }[]
+  /** The value this model writes to `*_type` columns, when `Relation::morphMap()` names it. */
+  morphAlias?: string | null
+  /** The app enforces a morph map and this model is not in it — `getMorphClass()` will throw. */
+  morphAliasMissing?: boolean
 }
 
 /** One node or edge in the format produced from `GraphData` (Cytoscape-compatible shape). */
@@ -213,3 +238,18 @@ export interface ListenerNodeData {
   queued: boolean
   deferred: boolean
 }
+
+export interface JobNodeData {
+  queued: boolean
+  tries: number | null
+  timeout: number | null
+  backoff: number | null
+  maxExceptions: number | null
+  unique: boolean
+  uniqueUntilProcessing: boolean
+  uniqueFor: number | null
+  encrypted: boolean
+  afterCommit: boolean
+  batchable: boolean
+  middleware: string[]
+  dynamic: string[]}

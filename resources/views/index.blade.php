@@ -14,7 +14,7 @@
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-react-CNktMmef.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-d3-DThTr3c3.js">
     <link rel="modulepreload" crossorigin href="/_laravel-brain/assets/vendor-utils-D7YtnGoz.js">
-    <link rel="stylesheet" crossorigin href="/_laravel-brain/assets/index-DtRlvgT8.css">
+    <link rel="stylesheet" crossorigin href="/_laravel-brain/assets/index-Br5fxVTv.css">
   </head>
   <body>
     <div id="root"></div>

@@ -38,15 +38,29 @@ interface Props {
   selectedId: string | null
 }
 
+// Membership in this map is what makes a method visible to the sidebar at all: `splitLabel`,
+// `routeSegments` and the chip filter all ask `first in METHOD_COLORS` before treating a tab
+// label's first word as a verb. A verb the analyzer emits but this map omits therefore renders
+// its whole "OPTIONS /health" label as the URI and cannot be filtered — which is what happened
+// to OPTIONS, extracted by RouteAnalyzer since the beginning and never once shown as a method.
+//
+// The two additions were picked by CIELAB distance rather than by eye. Against the five that were
+// already here the tightest existing pair is POST/PATCH at ΔE2000 19.3, so that is the bar:
+// cyan sits at ΔE 22.4 from its nearest neighbour (POST) and pink at 18.6 (DELETE). Both hold up
+// in either theme — contrast against the dark panel (#0f1018) is 10.5 and 7.2, against the light
+// panel (#ffffff) 1.8 and 2.7, inside the 1.7–2.8 band the existing five already occupy, and the
+// chips additionally paint a 16% tint and a 55% border of the same colour when toggled on.
 const METHOD_COLORS: Record<string, string> = {
   GET: '#4ade80',
   POST: '#60a5fa',
   PUT: '#f59e0b',
   PATCH: '#a78bfa',
   DELETE: '#f87171',
+  OPTIONS: '#22d3ee',
+  QUERY: '#f472b6',
 }
 
-const ALL_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
+const ALL_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'QUERY'] as const
 
 function splitLabel(label: string): { method: string | null; uri: string } {
   const [first, ...rest] = label.split(' ')
@@ -225,6 +239,7 @@ const CATEGORY_ICONS: Record<string, IconKey> = {
   Schedules: 'clock',
   'Model ERD': 'box',
   'Event Choreography': 'zap',
+  'AI Agents': 'zap',
   Other: 'route',
 }
 
@@ -245,6 +260,7 @@ function categoryBucket(tab: TabEntry): string {
   if (tab.category === 'Schedule') return 'Schedules'
   if (tab.category === 'ERD') return 'Model ERD'
   if (tab.category === 'Events') return 'Event Choreography'
+  if (tab.category === 'AI') return 'AI Agents'
   if (tab.category === 'Filament') {
     const p = tab.panelId ?? ''
     return p ? `Filament · ${p.charAt(0).toUpperCase()}${p.slice(1)} Panel` : 'Filament'

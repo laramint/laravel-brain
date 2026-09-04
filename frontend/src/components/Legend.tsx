@@ -17,6 +17,8 @@ const NODE_TYPES = [
   { type: 'abstract_class', label: 'Abstract class', color: '#94a3b8' },
   { type: 'service_provider', label: 'Service provider', color: '#ca8a04' },
   { type: 'facade', label: 'Facade', color: '#00BCD4' },
+  { type: 'ai_agent', label: 'AI Agent', color: '#A3E635' },
+  { type: 'ai_tool', label: 'AI Tool', color: '#65A30D' },
   { type: 'filament_panel',            label: 'Filament Panel',    color: '#7C3AED' },
   { type: 'filament_resource',         label: 'Filament Resource', color: '#A855F7' },
   { type: 'filament_page',             label: 'Filament Page',     color: '#C084FC' },

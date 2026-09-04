@@ -29,6 +29,21 @@ class AnalysisResult
         public int $totalFilamentResources = 0,
         /** @var string[] "FQCN::method" of methods that dispatch a job Brain couldn't resolve statically */
         public array $unresolvedDispatchers = [],
+        /**
+         * Nodes no edge touches, by type. A pass that builds nodes and forgets their edges lands
+         * here in full.
+         *
+         * @var array<string, int>
+         */
+        public array $isolatedNodes = [],
+        /**
+         * Nodes that reached no tab, by type — the stricter question, and the one that decides
+         * whether a reader ever sees them. A node can have edges and still sit in a cluster no
+         * tab seed reaches, which is how 22 correctly-wired AI nodes were measured invisible.
+         *
+         * @var array<string, int>
+         */
+        public array $nodesOutsideTabs = [],
     ) {}
 }
 
@@ -60,6 +75,8 @@ class ProjectAnalyzer
     private BladeViewAnalyzer $bladeViewAnalyzer;
 
     private FilamentAnalyzer $filamentAnalyzer;
+
+    private AiAnalyzer $aiAnalyzer;
 
     private QueryTracer $queryTracer;
 
@@ -150,13 +167,24 @@ class ProjectAnalyzer
             detectJobGroups: (bool) config('laravel-brain.job_groups.enabled', true),
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
-        $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
+        $this->modelAnalyzer = new ModelAnalyzer(
+            is_array($modelPaths) ? $modelPaths : [],
+            MorphMap::fromApplication(enabled: (bool) config('laravel-brain.morph_map.enabled', true)),
+        );
         $filamentPanelPaths = config('laravel-brain.filament.panel_paths', FilamentAnalyzer::DEFAULT_PANEL_PATHS);
         $filamentPaths = config('laravel-brain.filament.paths', FilamentAnalyzer::DEFAULT_PATHS);
         $this->filamentAnalyzer = new FilamentAnalyzer(
             is_array($filamentPanelPaths) ? $filamentPanelPaths : FilamentAnalyzer::DEFAULT_PANEL_PATHS,
             is_array($filamentPaths) ? $filamentPaths : FilamentAnalyzer::DEFAULT_PATHS,
         );
+        // Agents live wherever the application's classes live, so the source paths are the right
+        // default; the dedicated key exists for a project that keeps them somewhere narrower.
+        $aiPaths = config('laravel-brain.ai.paths', $sourcePaths);
+        $this->aiAnalyzer = new AiAnalyzer(
+            is_array($aiPaths) && $aiPaths !== [] ? $aiPaths : $sourcePaths,
+            (bool) config('laravel-brain.ai.enabled', true),
+        );
+
         $this->queryTracer = new QueryTracer($sourcePaths);
         $this->securityAnalyzer = new SecurityAnalyzer(
             extraAuthPatterns: $this->stringList(config('laravel-brain.security.auth_middleware', [])),
@@ -196,6 +224,9 @@ class ProjectAnalyzer
 
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
+        $this->graphBuilder->setCacheOperationsEnabled(
+            (bool) config('laravel-brain.cache_operations.enabled', true),
+        );
         $livewirePaths = config('laravel-brain.livewire.component_paths', []);
         if (is_array($livewirePaths) && $livewirePaths !== []) {
             $this->graphBuilder->setLivewireComponentPaths($livewirePaths);
@@ -519,6 +550,15 @@ class ProjectAnalyzer
             $this->emit('step:done', ['step' => 'filament_chains', 'count' => count($filamentPageEdges), 'unit' => 'call edge', 'message' => '    Discovered '.count($filamentPageEdges).' Filament page call chain edge(s)']);
         }
 
+        // Switched off skips the step outright rather than reporting a scan that found nothing.
+        $aiResult = AiAnalyzer::emptyResult();
+        if ($this->aiAnalyzer->isEnabled()) {
+            $this->emit('step:start', ['step' => 'ai', 'label' => 'Scanning AI agents', 'message' => '  → Scanning AI agents...']);
+            $aiResult = $this->aiAnalyzer->analyze($projectRoot);
+            $agentCount = count($aiResult['agents']);
+            $this->emit('step:done', ['step' => 'ai', 'count' => $agentCount, 'unit' => 'agent', 'extra' => count($aiResult['tools']).' tools', 'message' => '    Found '.$agentCount.' AI agent(s), '.count($aiResult['tools']).' tool(s)']);
+        }
+
         $this->emit('step:start', ['step' => 'queries', 'label' => 'Tracing DB queries', 'message' => '  → Tracing DB queries...']);
         $dbQueryMap = $this->queryTracer->buildQueryMap($callChain, $controllers, $psr4Map, $projectRoot);
         $this->emit('step:done', ['step' => 'queries', 'count' => count($dbQueryMap), 'unit' => 'action', 'message' => '    Found DB query info for '.count($dbQueryMap).' action(s)']);
@@ -576,6 +616,12 @@ class ProjectAnalyzer
                 }
                 $this->graphBuilder->addFilamentPageCallChain($filamentPageEdges, $pageNodeIds);
             }
+        }
+
+        // After Filament on purpose: an agent prompted from a Filament page method can only be
+        // wired to that method once its node exists. See GraphBuilder::addAi().
+        if ($aiResult['detected']) {
+            $this->graphBuilder->addAi($aiResult['agents'], $aiResult['tools'], $aiResult['callSites']);
         }
 
         // Descend into view composition last, so every view node reached by a
@@ -666,6 +712,14 @@ class ProjectAnalyzer
             }
         }
 
+        // Agents get a tab of their own for the same reason models do: nothing guarantees a route
+        // reaches them, and a node in no tab is invisible however well the graph knows about it.
+        $ai = $this->graphSplitter->buildAiTab($fullGraph, $projectName, $analyzedAt);
+        if ($ai !== null) {
+            $split['subgraphs'][$ai['id']] = $ai['graph'];
+            $split['manifest'][] = $ai['manifest'];
+        }
+
         $this->emit('step:done', ['step' => 'split', 'count' => count($split['subgraphs']), 'unit' => 'tab', 'message' => '    '.count($split['subgraphs']).' tab(s) generated']);
 
         $manifestJson = $this->graphSplitter->buildManifestJson(
@@ -684,6 +738,8 @@ class ProjectAnalyzer
             totalChannels: count($channels),
             totalFilamentResources: $filamentResourceCount,
             unresolvedDispatchers: $this->methodTracer->unresolvedDispatchers(),
+            isolatedNodes: $fullGraph->isolatedNodeCountsByType(),
+            nodesOutsideTabs: GraphSplitter::nodesOutsideTabs($fullGraph, $split['subgraphs']),
         );
 
         $this->emit('analysis:done', [

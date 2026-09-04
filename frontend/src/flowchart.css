@@ -53,6 +53,7 @@
 .flowchart-box--loop     { background: rgba(156, 39, 176, 0.1); border-color: rgba(156, 39, 176, 0.35); color: #CE93D8; }
 .flowchart-box--dispatch { background: rgba(255, 87, 34, 0.12); border-color: rgba(255, 87, 34, 0.35); color: #FFAB91; }
 .flowchart-box--event    { background: rgba(0, 188, 212, 0.1); border-color: rgba(0, 188, 212, 0.3); color: #80DEEA; }
+.flowchart-box--cache    { background: rgba(0, 150, 136, 0.12); border-color: rgba(0, 150, 136, 0.35); color: #80CBC4; }
 
 .flowchart-icon {
   flex-shrink: 0;
@@ -130,6 +131,25 @@
 }
 
 /* ── N+1 Warnings ─────────────────────────────────── */
+.flowchart-cache-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.flowchart-cache-badge--read       { background: rgba(33, 150, 243, 0.2);  border: 1px solid rgba(33, 150, 243, 0.4);  color: #90CAF9; }
+.flowchart-cache-badge--write      { background: rgba(244, 67, 54, 0.2);   border: 1px solid rgba(244, 67, 54, 0.4);   color: #EF9A9A; }
+.flowchart-cache-badge--invalidate { background: rgba(255, 152, 0, 0.2);   border: 1px solid rgba(255, 152, 0, 0.4);   color: #FFCC80; }
+.flowchart-cache-badge--lock       { background: rgba(156, 39, 176, 0.2);  border: 1px solid rgba(156, 39, 176, 0.4);  color: #CE93D8; }
+
+/* The N+1 warning also claims `margin-left: auto`; on a step carrying both, the cache badge
+   takes the space and the warning sits beside it rather than fighting for the same edge. */
+.flowchart-cache-badge + .flowchart-n1-warn { margin-left: 4px; }
+
 .flowchart-n1-warn {
   margin-left: auto;
   padding: 1px 6px;
@@ -169,6 +189,7 @@
 [data-theme="light"] .flowchart-box--loop     { background: rgba(156, 39, 176, 0.08); border-color: rgba(156, 39, 176, 0.4);  color: #6A1B9A; }
 [data-theme="light"] .flowchart-box--dispatch { background: rgba(255, 87, 34, 0.08);  border-color: rgba(255, 87, 34, 0.4);   color: #BF360C; }
 [data-theme="light"] .flowchart-box--event    { background: rgba(0, 188, 212, 0.08);  border-color: rgba(0, 188, 212, 0.4);   color: #006064; }
+[data-theme="light"] .flowchart-box--cache    { background: rgba(0, 150, 136, 0.08);  border-color: rgba(0, 150, 136, 0.4);   color: #00695C; }
 
 [data-theme="light"] .flowchart-branch--then .flowchart-branch-label { color: #2E7D32; }
 [data-theme="light"] .flowchart-branch--else .flowchart-branch-label { color: #C62828; }

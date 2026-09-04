@@ -602,6 +602,7 @@ body::before {
 }
 .prop-key { color: var(--dim); min-width: 80px; flex-shrink: 0; }
 .prop-value { color: var(--text); word-break: break-all; }
+.prop-value--warn { color: var(--warn); }
 
 .edge-row {
   display: flex;
@@ -2306,6 +2307,106 @@ body::before {
   color: #9C27B0;
 }
 
+/* ── Cache operations ─────────────────────────────── */
+.sidebar-section--cache h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar-section--cache h3::before {
+  content: '⛃';
+  font-size: 12px;
+}
+
+.cache-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cache-item {
+  padding: 4px 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.cache-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cache-kind {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+/* Read/write echo the DB query colours on purpose — the same question, one layer up. */
+.cache-kind--read       { background: rgba(33, 150, 243, 0.15); color: #2196F3; }
+.cache-kind--write      { background: rgba(244, 67, 54, 0.15);  color: #F44336; }
+.cache-kind--invalidate { background: rgba(255, 152, 0, 0.15);  color: #FF9800; }
+.cache-kind--lock       { background: rgba(156, 39, 176, 0.15); color: #BA68C8; }
+
+.cache-method {
+  color: var(--dim);
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.cache-key {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A key we could not read is stated as such, never dressed up as one we could. */
+.cache-key--computed {
+  color: var(--dim);
+  font-style: italic;
+}
+.cache-key--constructed {
+  color: #CE93D8;
+}
+
+.cache-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  padding-left: 2px;
+}
+
+.cache-meta {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--dim);
+}
+.cache-meta--tag {
+  background: rgba(0, 150, 136, 0.12);
+  border-color: rgba(0, 150, 136, 0.3);
+  color: #4DB6AC;
+}
+
+[data-theme="light"] .cache-item,
+[data-theme="light"] .cache-meta { background: rgba(0,0,0,0.03); }
+[data-theme="light"] .cache-key--constructed { color: #6A1B9A; }
+[data-theme="light"] .cache-meta--tag { color: #00695C; }
+
 /* ── Modals & Overlays ────────────────────────────── */
 .modal-overlay {
   position: fixed;
@@ -3596,14 +3697,18 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
   background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 14px;
 }
-.left-method-chips { display: flex; gap: 5px; padding: 0 12px 10px; }
+/* Wraps because the row is no longer five short words: at the 280px minimum sidebar width seven
+   chips leave ~32px each, and OPTIONS needs ~42px at 10px mono. `flex: 1 1 auto` with a basis of
+   the label lets a short row still fill the width while a long one spills onto a second line
+   instead of clipping "OPTIONS" to "OPTIO". */
+.left-method-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 10px; }
 .method-chip {
-  flex: 1;
+  flex: 1 1 auto;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--faint);
   border-radius: 6px;
-  padding: 4px 0;
+  padding: 4px 6px;
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 600;
