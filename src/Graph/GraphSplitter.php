@@ -300,8 +300,7 @@ class GraphSplitter
         string $analyzedAt,
         array $tableStats = [],
         array $schemas = [],
-    ): ?array
-    {
+    ): ?array {
         if (empty($models)) {
             return null;
         }
