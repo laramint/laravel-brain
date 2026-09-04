@@ -93,7 +93,6 @@ const CACHE_KIND_HINTS: Record<string, string> = {
   lock:       'Takes an atomic lock through the cache store.',
 }
 
-type TabId = 'info' | 'risks' | 'flow' | 'source' | 'edges' | 'usages' | 'stress'
 
 export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
