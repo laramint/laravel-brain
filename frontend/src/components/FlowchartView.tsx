@@ -164,6 +164,17 @@ function FlowBox({ step }: { step: FlowStep }) {
           ⚠️ N+1
         </span>
       )}
+      {step.http && step.http.length > 0 && (
+        <span
+          className="flowchart-http"
+          title={step.http
+            .map(c => `${c.method || 'REQUEST'} ${c.host || (c.configKey && `config('${c.configKey}')`) || 'address computed at runtime'}` +
+              (c.timeout === null ? ' · no timeout' : ` · timeout ${c.timeout}s`))
+            .join('\n')}
+        >
+          🌐 {step.http.map(c => c.host).find(Boolean) ?? 'external'}
+        </span>
+      )}
     </div>
   )
 }

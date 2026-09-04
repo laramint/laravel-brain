@@ -1432,6 +1432,14 @@ export function GraphView({
               (sec && ((sec.issues?.length ?? 0) > 0 || (sec.riskLevel && sec.riskLevel !== 'none')))
             )
 
+            // One label per distinct third party, shortest first, so the card names *who* it calls
+            // when it can and falls back to saying only *that* it calls out when it cannot.
+            const httpCalls = (n.data.httpCalls ?? []) as Array<{ host?: string; configKey?: string }>
+            const MAX_HTTP_TARGET = 14
+            const httpTargets = Array.from(new Set(
+              httpCalls.map(c => c.host || c.configKey || 'external')
+            )).map(t => t.length > MAX_HTTP_TARGET ? t.slice(0, MAX_HTTP_TARGET - 1) + '…' : t)
+
             const MAX_CLASS = 24
             const MAX_METHOD = 26
             const classDisplay = className.length > MAX_CLASS ? className.slice(0, MAX_CLASS - 1) + '…' : className
@@ -1486,6 +1494,16 @@ export function GraphView({
                         fontFamily="ui-monospace, monospace" fill="#F44336"
                         dominantBaseline="middle" style={{ pointerEvents: 'none' }}>
                         N+1
+                      </text>
+                    )}
+                    {/* Outgoing HTTP, compact: the glyph only, and only when N+1 has not claimed
+                        the one slot on the right. A compact card is a name and nothing else, so a
+                        defect outranks a fact when they compete for the same 20 pixels. */}
+                    {httpTargets.length > 0 && !n.data.hasN1 && (
+                      <text x={hw - 6} y={0} fontSize={9} textAnchor="end"
+                        fontFamily="ui-monospace, monospace" fill="#38bdf8"
+                        dominantBaseline="middle" style={{ pointerEvents: 'none' }}>
+                        🌐
                       </text>
                     )}
                     {/* Security exposure badge (compact) */}
@@ -1562,6 +1580,21 @@ export function GraphView({
                         fontFamily="ui-monospace, monospace" fill={mutedColor}
                         style={{ pointerEvents: 'none' }}>
                         ↻ {methodTrimmed}
+                      </text>
+                    )}
+
+                    {/* Outgoing HTTP marker.
+                        A node that leaves the process is worth spotting without opening the panel:
+                        latency, rate limits and outages all enter the graph here, and nothing else
+                        on the card says so. It is drawn in the free bottom-right corner rather than
+                        recolouring the border the way hasN1 does, because calling a third party is
+                        a fact about the code and not a defect — the red border and the risk dot are
+                        reserved for things that are wrong. */}
+                    {httpTargets.length > 0 && (
+                      <text x={hw - 10} y={hh - 10} fontSize={9} textAnchor="end"
+                        fontFamily="ui-monospace, monospace" fill="#38bdf8"
+                        style={{ pointerEvents: 'none' }}>
+                        🌐 {httpTargets[0]}{httpTargets.length > 1 ? ` +${httpTargets.length - 1}` : ''}
                       </text>
                     )}
                   </>

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
-import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation } from '../types/graph'
+import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation, HttpCall } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
 import { FlowchartModal } from './FlowchartModal'
@@ -302,6 +302,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
 
   const dbQueries = (node.data?.dbQueries ?? []) as DbQuery[]
   const cacheOps = (node.data?.cacheOps ?? []) as CacheOperation[]
+  const httpCalls = (node.data?.httpCalls ?? []) as HttpCall[]
   const relationships = (node.data?.relationships ?? []) as Array<{ type: string; related: string }>
   const middlewareParams = (node.type === 'middleware' && typeof node.data?.params === 'string' && node.data.params)
     ? (node.data.params as string).split(',').map(s => s.trim()).filter(Boolean)
@@ -321,6 +322,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'classMetrics' &&
       key !== 'dbQueries' &&
       key !== 'cacheOps' &&
+      key !== 'httpCalls' &&
       key !== 'relationships' &&
       key !== 'params' &&
       key !== 'members' &&
@@ -429,6 +431,13 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
               >
                 ⚠ {SECURITY_SEVERITY_LABELS[securityData.riskLevel]} risk · {securityIssueCount}
               </span>
+            )}
+            {httpCalls.length > 0 && (
+              <Tooltip content={`Leaves the application: ${httpCalls.map(c => c.host || c.configKey || 'computed address').join(', ')}`}>
+                <span className="ins-chip ins-chip--http">
+                  🌐 {httpCalls.length} outgoing
+                </span>
+              </Tooltip>
             )}
             {(incomingEdges.length + outgoingEdges.length) > 0 && (
               <span className="ins-chip ins-chip--neutral">
@@ -808,6 +817,55 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                         )}
                       </div>
                     ))}
+                    </div>
+                  </div>
+                )}
+
+              {httpCalls.length > 0 && (
+                <div className="sidebar-section sidebar-section--http">
+                  <h3>Outgoing HTTP</h3>
+                  <div className="http-list">
+                    {httpCalls.map((call, i) => {
+                      // Say where the request goes in whatever terms the source allowed. A config
+                      // key names the integration as precisely as a URL does, and "computed at
+                      // runtime" is an honest answer — printing a guessed host would not be.
+                      const target = call.configKey
+                        ? `config('${call.configKey}')${call.url}`
+                        : call.url || 'address computed at runtime'
+                      return (
+                        <div key={i} className="http-item">
+                          <div className="http-item-head">
+                            <span className={`http-method http-method--${(call.method || 'unknown').toLowerCase()}`}>
+                              {call.method || 'REQUEST'}
+                            </span>
+                            <span className="http-target" title={target}>{target}</span>
+                          </div>
+                          <div className="http-item-meta">
+                            <span className="http-badge http-badge--client">{call.client}</span>
+                            {call.urlSource === 'constructed' && (
+                              <Tooltip content="The address starts with this literal and continues with something computed at runtime">
+                                <span className="http-badge">partly computed</span>
+                              </Tooltip>
+                            )}
+                            {call.async && <span className="http-badge">async</span>}
+                            {call.timeout !== null ? (
+                              <span className="http-badge">timeout {call.timeout}s</span>
+                            ) : (
+                              <Tooltip content="No timeout declared: this request waits as long as the third party takes">
+                                <span className="http-badge http-badge--absent">no timeout</span>
+                              </Tooltip>
+                            )}
+                            {call.retryTimes !== null ? (
+                              <span className="http-badge">
+                                retry {call.retryTimes}×{call.retrySleep !== null ? ` / ${call.retrySleep}ms` : ''}
+                              </span>
+                            ) : (
+                              <span className="http-badge http-badge--muted">no retry</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

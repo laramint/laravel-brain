@@ -702,6 +702,31 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Outgoing HTTP detection
+    // -------------------------------------------------------------------------
+    // Every method Brain charts is also read for calls that leave the application
+    // — the Http facade, a Guzzle client, curl_exec, file_get_contents on a URL —
+    // so a node that talks to a third party says so, with the host, the method and
+    // the declared timeout and retry.
+    //
+    // The cost is one extra walk of the expressions a method owns, on top of the
+    // walk that builds its flow chart. Measured on the fixture suite it is a few
+    // per cent of a scan, and it produces nothing at all for a project that makes
+    // no outgoing calls.
+    //
+    // Turn it off if your application talks to nothing outside itself (so the scan
+    // is pure overhead), if the extra per-node data makes the exported graph JSON
+    // larger than you want to ship, or to get a scan finished on a very large
+    // codebase where every pass counts. Nothing else in the graph depends on it:
+    // the panel section and the canvas marker simply do not appear.
+    //
+    // Override via the LARAVEL_BRAIN_OUTGOING_HTTP_ENABLED env variable.
+    //
+    'outgoing_http' => [
+        'enabled' => env('LARAVEL_BRAIN_OUTGOING_HTTP_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // MCP Server
     // -------------------------------------------------------------------------
     // Controls the "brain" MCP server, reachable via `php artisan mcp:start brain`

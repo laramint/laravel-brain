@@ -153,6 +153,28 @@ class GraphBuilder
     }
 
     /**
+     * Whether nodes report the outgoing HTTP requests their method makes.
+     *
+     * Forwarded to the flow extractor rather than filtered out of the node data here, so that a
+     * project which turns this off does not pay for the scan first.
+     */
+    public function setDetectOutgoingHttp(bool $enabled): void
+    {
+        $this->flowExtractor->detectOutgoingHttp($enabled);
+    }
+
+    /**
+     * The builder methods {@see PendingRequestAnalyzer} found, so a call made through one is
+     * reported on the node that makes it.
+     *
+     * @param  array<string, array<string, mixed>>  $builders  method name => settings
+     */
+    public function setPendingRequestBuilders(array $builders): void
+    {
+        $this->flowExtractor->setPendingRequestBuilders($builders);
+    }
+
+    /**
      * The view roots a view name is resolved against. Must match what
      * {@see BladeViewAnalyzer} was given, or the two
      * disagree about which templates exist.
@@ -896,6 +918,7 @@ class GraphBuilder
                     'visibility' => $this->extractVisibility($fqcn, $method),
                     ...($absMetrics ? ['metrics' => $absMetrics] : []),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                     ...($this->isFatMethod($absMetrics) ? ['fatMethod' => true] : []),
                 ]));
                 break;
@@ -924,6 +947,7 @@ class GraphBuilder
                     'visibility' => $this->extractVisibility($fqcn, $method),
                     ...($svcMetrics ? ['metrics' => $svcMetrics] : []),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                     ...($this->isFatMethod($svcMetrics) ? ['fatMethod' => true] : []),
                     ...($payloadKeys === [] ? [] : ['payloadKeys' => $payloadKeys]),
                 ]));
@@ -940,6 +964,7 @@ class GraphBuilder
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                 ]));
                 break;
 
@@ -959,6 +984,7 @@ class GraphBuilder
                     'visibility' => 'public',
                     ...($jobFacts === null ? [] : ['job' => $jobFacts->toArray()]),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                 ]));
                 break;
 
@@ -976,6 +1002,7 @@ class GraphBuilder
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                 ]));
                 break;
 
@@ -990,6 +1017,7 @@ class GraphBuilder
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                 ]));
                 break;
 
@@ -1008,6 +1036,7 @@ class GraphBuilder
                     'visibility' => $this->extractVisibility($fqcn, $method),
                     ...($repoMetrics ? ['metrics' => $repoMetrics] : []),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                     ...($this->isFatMethod($repoMetrics) ? ['fatMethod' => true] : []),
                     ...(empty($validationRules) ? [] : ['validationRules' => $validationRules]),
                 ]));
@@ -1037,6 +1066,7 @@ class GraphBuilder
                     'accessor' => $facadeRecord !== null ? $facadeRecord->accessor : '',
                     'concreteFqcn' => $facadeRecord !== null ? $facadeRecord->concreteFqcn : null,
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                    ...$this->httpCallData($flowSteps),
                 ]));
                 if ($methodLocation !== null && $methodLocation['declaringFqcn'] !== $fqcn) {
                     $this->wireInheritedMethodDelegation($id, $methodLocation, $method);
@@ -1079,6 +1109,7 @@ class GraphBuilder
             'visibility' => $this->extractVisibility($fqcn, $method),
             ...($svcMetrics ? ['metrics' => $svcMetrics] : []),
             ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+            ...$this->httpCallData($flowSteps),
             ...($this->isFatMethod($svcMetrics) ? ['fatMethod' => true] : []),
             ...(empty($validationRules) ? [] : ['validationRules' => $validationRules]),
         ]));
@@ -1405,6 +1436,7 @@ class GraphBuilder
                 'members' => [],
                 'flowSteps' => $flowSteps,
                 ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                ...$this->httpCallData($flowSteps),
             ]));
         }
 
@@ -1884,6 +1916,7 @@ class GraphBuilder
             if ($this->hasN1InSteps($flowSteps)) {
                 $nodeData['hasN1'] = true;
             }
+            $nodeData += $this->httpCallData($flowSteps);
         }
 
         // Attach security surface map data when available
@@ -2025,6 +2058,8 @@ class GraphBuilder
             $nodeData['hasN1'] = true;
         }
 
+        $nodeData += $this->httpCallData($flowSteps);
+
         if ($this->isFatMethod($metrics)) {
             $nodeData['fatMethod'] = true;
         }
@@ -2071,6 +2106,56 @@ class GraphBuilder
         }
 
         return 'public';
+    }
+
+    /**
+     * The outgoing HTTP requests a method makes, as node data.
+     *
+     * Gathered from the flow steps rather than by re-reading the AST, for the same reason `hasN1`
+     * is: FlowExtractor has already been over this method, and the calls are hanging on the steps
+     * it produced. Every node type that charts a flow therefore reports its third parties, without
+     * a second pass and without a per-node-type detector.
+     *
+     * The key is absent rather than empty when a method calls nobody — the sidebar and the canvas
+     * both key off presence, and an empty array in every node of a large graph is bytes on the
+     * wire that mean nothing.
+     *
+     * @param  array[]  $flowSteps
+     * @return array<string, mixed>
+     */
+    private function httpCallData(array $flowSteps): array
+    {
+        $calls = $this->collectHttpCalls($flowSteps);
+
+        return $calls === [] ? [] : ['httpCalls' => $calls];
+    }
+
+    /**
+     * Walk the step tree for HTTP calls, keeping one row per distinct request.
+     *
+     * The same request written twice in a method — a retry loop's fallback, a call in both arms of
+     * an `if` — is one third party, one host, one timeout to reason about, so it is listed once.
+     * Two calls that differ in any field are two rows, because the difference (a POST as well as a
+     * GET, a second host, a timeout on one and not the other) is the part worth seeing.
+     *
+     * @param  array[]  $steps
+     * @return array[]
+     */
+    private function collectHttpCalls(array $steps): array
+    {
+        $calls = [];
+        foreach ($steps as $step) {
+            foreach (($step['http'] ?? []) as $call) {
+                $calls[json_encode($call)] = $call;
+            }
+            foreach (['then', 'else', 'body'] as $branch) {
+                foreach ($this->collectHttpCalls($step[$branch] ?? []) as $call) {
+                    $calls[json_encode($call)] = $call;
+                }
+            }
+        }
+
+        return array_values($calls);
     }
 
     private function hasN1InSteps(array $steps): bool
@@ -2567,6 +2652,7 @@ class GraphBuilder
                     'metrics' => $metrics ?: null,
                     'hasN1' => $hasN1,
                     'fatMethod' => ! empty($metrics) && $this->isFatMethod($metrics),
+                    ...$this->httpCallData($flowSteps),
                 ]));
             }
         }
@@ -2709,6 +2795,7 @@ class GraphBuilder
                     'class' => $ch->class,
                     'file' => $ch->file,
                     'flowSteps' => $flowSteps,
+                    ...$this->httpCallData($flowSteps),
                 ]));
             }
         }
@@ -2925,6 +3012,7 @@ class GraphBuilder
                         'visibility' => $visibility,
                         ...($metrics ? ['metrics' => $metrics] : []),
                         ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
+                        ...$this->httpCallData($flowSteps),
                         ...($this->isFatMethod($metrics) ? ['fatMethod' => true] : []),
                     ]));
                 }
