@@ -49,7 +49,6 @@ export interface GraphData {
   edges: GraphEdge[]
 }
 
-/** Shape of `node.data.erd` for model nodes in the Model ERD tab. */
 /**
  * What the live database reported for a model's table. Every figure is optional and they are not
  * all-or-nothing: a total size comes from every driver Laravel supports, while the row count and
@@ -64,6 +63,22 @@ export interface TableStatsData {
   rowsEstimated: boolean
 }
 
+/** The live shape of a model's table, as the database catalogue reports it. */
+export interface TableSchemaData {
+  table: string
+  columns: { name: string; type: string; nullable: boolean; default: string | null; autoIncrement: boolean }[]
+  indexes: { name: string; columns: string[]; unique: boolean; primary: boolean }[]
+  foreignKeys: {
+    name: string
+    columns: string[]
+    foreignTable: string
+    foreignColumns: string[]
+    onDelete: string | null
+    onUpdate: string | null
+  }[]
+}
+
+/** Shape of `node.data.erd` for model nodes in the Model ERD tab. */
 export interface ErdModelData {
   table: string
   primaryKey: string

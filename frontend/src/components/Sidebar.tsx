@@ -54,7 +54,7 @@ const TYPE_COLORS: Record<string, string> = {
   filament_relation_manager: '#0891B2',
 }
 
-type TabId = 'info' | 'risks' | 'flow' | 'source' | 'edges' | 'usages' | 'stress'
+type TabId = 'info' | 'risks' | 'schema' | 'flow' | 'source' | 'edges' | 'usages' | 'stress'
 
 /** Bytes as the unit a person would say out loud: 28.8 MB, not 30220288. */
 function formatBytes(bytes: number | null): string {
@@ -273,16 +273,24 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'security' &&
       key !== 'erd' &&
       key !== 'tableStats' &&
+      key !== 'schema' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
   const erd = node.data?.erd as import('../types/graph').ErdModelData | undefined
   const tableStats = node.data?.tableStats as import('../types/graph').TableStatsData | undefined
+  const tableSchema = node.data?.schema as import('../types/graph').TableSchemaData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
   const hasEdges = incomingEdges.length > 0 || outgoingEdges.length > 0
   const isRoute = node.type === 'route'
+
+  // Findings are no longer a route's alone — a table with an unindexed foreign key carries the
+  // same payload, so this is read for any node that has one.
+  const securityData = node.data?.security
+    ? node.data.security as { exposure: string; riskLevel: string; issues: Array<{ type: string; severity: string; message: string; file: string | null; line: number | null }> }
+    : null
 
   // If the active tab became unavailable after a node change, fall back to info
   const safeTab: TabId =
@@ -290,19 +298,17 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
     (activeTab === 'source' && !hasSource) ||
     (activeTab === 'edges' && !hasEdges) ||
     (activeTab === 'stress' && !isRoute) ||
-    (activeTab === 'risks' && !isRoute)
+    (activeTab === 'schema' && !tableSchema) ||
+    (activeTab === 'risks' && !isRoute && !securityData)
       ? 'info'
       : activeTab
-
-  const securityData = isRoute && node.data?.security
-    ? node.data.security as { exposure: string; riskLevel: string; issues: Array<{ type: string; severity: string; message: string; file: string | null; line: number | null }> }
-    : null
   const securityIssueCount = securityData ? securityData.issues.length : 0
   const exposureColors = theme === 'light' ? SECURITY_EXPOSURE_COLORS_LIGHT : SECURITY_EXPOSURE_COLORS
 
   const tabs: { id: TabId; label: string; count?: number; alert?: boolean; title: string }[] = [
     { id: 'info', label: 'Info', title: 'Identity, type, smells, and code metrics (lines, cyclomatic complexity, …).' },
-    ...(isRoute ? [{ id: 'risks' as TabId, label: 'Risks', count: securityIssueCount || undefined, alert: securityIssueCount > 0, title: 'Security findings: exposure level, authentication, rate-limiting, mass-assignment, and unvalidated input risks.' }] : []),
+    ...(isRoute || securityIssueCount > 0 ? [{ id: 'risks' as TabId, label: 'Risks', count: securityIssueCount || undefined, alert: securityIssueCount > 0, title: 'Findings that need attention: a route\u2019s exposure and rate-limiting, or a table\u2019s missing indexes.' }] : []),
+    ...(tableSchema ? [{ id: 'schema' as TabId, label: 'Schema', count: tableSchema.columns.length || undefined, title: 'Columns, indexes and foreign keys as the database itself reports them.' }] : []),
     ...(hasFlow ? [{ id: 'flow' as TabId, label: 'Flow', title: 'Control-flow steps through this method or request (and sequence diagram for routes).' }] : []),
     ...(hasEdges ? [{ id: 'edges' as TabId, label: 'Edges', count: incomingEdges.length + outgoingEdges.length, title: 'What calls or references this node (incoming) and what it calls (outgoing).' }] : []),
     { id: 'usages', label: 'Usages', title: 'Where this symbol is referenced across the whole project, grouped by file.' },
@@ -344,8 +350,11 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
           </div>
           <h2 className="sidebar-node-title">{node.label}</h2>
           <div className="sidebar-chips">
-            {securityData && (() => {
-              const palette = exposureColors[securityData.exposure] ?? exposureColors['public']
+            {securityData && exposureColors[securityData.exposure] && (() => {
+              // Exposure is a route's word for who can reach it. A table has no answer, and the
+              // fallback used to label it `Public` — which reads as a claim, and a frightening
+              // one. An unrecognised exposure now shows no chip at all.
+              const palette = exposureColors[securityData.exposure]
               return (
                 <span className="ins-chip" style={{ '--cc': palette.accent } as React.CSSProperties}>
                   ● {palette.label}
@@ -794,16 +803,85 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
           )}
 
           {/* ── Usages tab ── */}
+          {safeTab === 'schema' && tableSchema && (
+            <div>
+              <div className="sidebar-section">
+                <h3>Columns <span className="section-count">{tableSchema.columns.length}</span></h3>
+                <div className="schema-table">
+                  {tableSchema.columns.map((column) => (
+                    <div className="schema-row" key={column.name}>
+                      <span className="schema-name">{column.name}</span>
+                      <span className="schema-type">{column.type}</span>
+                      <span className="schema-flags">
+                        {column.autoIncrement && <span className="schema-flag">auto</span>}
+                        {column.nullable
+                          ? <span className="schema-flag schema-flag--muted">null</span>
+                          : <span className="schema-flag">not null</span>}
+                        {column.default !== null && <span className="schema-flag schema-flag--muted">= {column.default}</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="sidebar-section">
+                <h3>Indexes <span className="section-count">{tableSchema.indexes.length}</span></h3>
+                {tableSchema.indexes.length === 0 && <div className="sidebar-empty">No indexes.</div>}
+                <div className="schema-table">
+                  {tableSchema.indexes.map((index) => (
+                    <div className="schema-row" key={index.name}>
+                      <span className="schema-name">{index.columns.join(', ')}</span>
+                      <span className="schema-type">{index.name}</span>
+                      <span className="schema-flags">
+                        {index.primary && <span className="schema-flag">primary</span>}
+                        {index.unique && !index.primary && <span className="schema-flag">unique</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="sidebar-section">
+                <h3>Foreign keys <span className="section-count">{tableSchema.foreignKeys.length}</span></h3>
+                {tableSchema.foreignKeys.length === 0 && <div className="sidebar-empty">No foreign keys.</div>}
+                <div className="schema-table">
+                  {tableSchema.foreignKeys.map((key) => {
+                    // The same prefix rule the analyzer applies, so the marker on screen and the
+                    // finding in the Risks tab can never disagree about one key.
+                    const covered = tableSchema.indexes.some(
+                      (index) => index.columns.slice(0, key.columns.length).join('\u0000') === key.columns.join('\u0000')
+                    )
+
+                    return (
+                      <div className={`schema-row${covered ? '' : ' schema-row--flagged'}`} key={key.name}>
+                        <span className="schema-name">{key.columns.join(', ')}</span>
+                        <span className="schema-type">→ {key.foreignTable}.{key.foreignColumns.join(', ')}</span>
+                        <span className="schema-flags">
+                          {key.onDelete && key.onDelete !== 'no action' && (
+                            <span className="schema-flag schema-flag--muted">on delete {key.onDelete}</span>
+                          )}
+                          {!covered && <span className="schema-flag schema-flag--warn">no index</span>}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {safeTab === 'usages' && selectedId && (
             <UsagesView nodeId={selectedId} />
           )}
 
           {/* ── Security tab ── */}
-          {safeTab === 'risks' && isRoute && securityData && (
+          {safeTab === 'risks' && securityData && (
             <div className="sidebar-section sidebar-section--security">
-              {/* Exposure Level */}
-              {(() => {
-                const palette = exposureColors[securityData.exposure] ?? exposureColors['public']
+              {/* Exposure Level — a route's concept, so it is drawn only for a route's exposure.
+                  A table carries findings without one, and the card would otherwise announce it
+                  as a "Public Route". */}
+              {exposureColors[securityData.exposure] && (() => {
+                const palette = exposureColors[securityData.exposure]
                 const exposureDescriptions: Record<string, string> = {
                   public:  'This route is publicly accessible — no authentication middleware detected.',
                   guest:   'This route is for unauthenticated users and redirects authenticated ones away.',
@@ -827,7 +905,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
               {/* Issue List */}
               {securityData.issues.length === 0 ? (
                 <div className="security-clean">
-                  <span style={{ color: SECURITY_RISK_COLORS['none'] }}>✓</span> No security issues detected on this route.
+                  <span style={{ color: SECURITY_RISK_COLORS['none'] }}>✓</span> Nothing flagged here.
                 </div>
               ) : (
                 <>
