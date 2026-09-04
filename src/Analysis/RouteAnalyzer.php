@@ -1075,6 +1075,8 @@ class RouteAnalyzer
 
                     if (in_array($methodName, self::HTTP_METHODS, true)) {
                         $this->handleHttpRoute($node, $methodName);
+                    } elseif ($methodName === 'match') {
+                        $this->handleMatchRoute($node);
                     } elseif ($methodName === 'group') {
                         $this->enterGroupFromStaticCall($node);
                     } elseif (in_array($methodName, ['resource', 'apiResource'], true)) {
@@ -1095,6 +1097,8 @@ class RouteAnalyzer
                         $this->enterGroupFromMethodChain($node);
                     } elseif (in_array($methodName, self::HTTP_METHODS, true)) {
                         $this->handleHttpRoute($node, $methodName);
+                    } elseif ($methodName === 'match') {
+                        $this->handleMatchRoute($node);
                     } elseif (in_array($methodName, ['resource', 'apiResource'], true)) {
                         $this->handleResource($node, $methodName);
                     } elseif ($methodName === 'livewire') {
@@ -1139,10 +1143,13 @@ class RouteAnalyzer
             /**
              * @param  string[]  $extraMiddlewares  Middleware collected from post-route chaining
              *                                      (e.g. Route::get(...)->middleware('ability:...'))
+             * @param  int  $argOffset  Index of the URI argument. 0 for Route::get('/uri', ...);
+             *                          1 for Route::match(['get','post'], '/uri', ...), whose first
+             *                          argument is the methods array rather than the URI.
              */
-            private function handleHttpRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, string $method, array $extraMiddlewares = []): void
+            private function handleHttpRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, string $method, array $extraMiddlewares = [], int $argOffset = 0): void
             {
-                $uri = $this->extractString($node->args[0] ?? null);
+                $uri = $this->extractString($node->args[$argOffset] ?? null);
                 if ($uri === null) {
                     return;
                 }
@@ -1159,10 +1166,10 @@ class RouteAnalyzer
                 $stackController = end($this->controllerStack) ?: '';
                 $controllerContext = $chainController !== '' ? $chainController : $stackController;
 
-                [$controller, $actionMethod, $closureNode, $mayPrependNamespace] = $this->extractAction($node->args[1] ?? null, $controllerContext);
+                [$controller, $actionMethod, $closureNode, $mayPrependNamespace] = $this->extractAction($node->args[$argOffset + 1] ?? null, $controllerContext);
 
                 // An array action can carry its own middleware alongside `uses`.
-                $actionArg = $node->args[1] ?? null;
+                $actionArg = $node->args[$argOffset + 1] ?? null;
                 $actionValue = $actionArg instanceof Node\Arg ? $actionArg->value : $actionArg;
                 if ($actionValue !== null) {
                     $actionMiddleware = $this->arrayValueFor($actionValue, 'middleware');
@@ -1200,6 +1207,41 @@ class RouteAnalyzer
                     closureNode: $closureNode,
                     closureUseMap: $closureNode !== null ? $this->useMap : null,
                 );
+            }
+
+            /**
+             * Handles Route::match(['get', 'post'], '/uri', $action) — registers one
+             * RouteDefinition per HTTP verb named in the methods array, mirroring how
+             * Laravel's router itself expands a match() call.
+             *
+             * @param  string[]  $extraMiddlewares  Middleware collected from post-route chaining
+             *                                      (e.g. Route::match([...], ...)->middleware('auth'))
+             */
+            private function handleMatchRoute(Node\Expr\StaticCall|Node\Expr\MethodCall $node, array $extraMiddlewares = []): void
+            {
+                $methodsArg = $node->args[0] ?? null;
+                $methodsValue = $methodsArg instanceof Node\Arg ? $methodsArg->value : $methodsArg;
+                if ($methodsValue === null) {
+                    return;
+                }
+
+                // extractMiddlewareList() resolves a ClassConstFetch to its class name, which is
+                // right for `SomeMiddleware::class` but wrong for a verb written as a class
+                // constant (e.g. Request::METHOD_GET) — that would come back as the class's FQCN,
+                // not a verb. Filtering to the verbs this analyzer actually understands drops such
+                // an entry instead of registering a bogus route, matching how an unrecognised verb
+                // was already handled before Route::match() support existed: silently ignored.
+                $methods = array_values(array_intersect(
+                    array_unique(array_map('strtolower', $this->extractMiddlewareList($methodsValue))),
+                    [...self::HTTP_METHODS, 'head'],
+                ));
+                if ($methods === []) {
+                    return;
+                }
+
+                foreach ($methods as $method) {
+                    $this->handleHttpRoute($node, $method, $extraMiddlewares, 1);
+                }
             }
 
             /**
@@ -1287,6 +1329,12 @@ class RouteAnalyzer
                         return true;
                     }
 
+                    if ($name === 'match') {
+                        $this->handleMatchRoute($current, $postMiddlewares);
+
+                        return true;
+                    }
+
                     $current = $current->var;
                 }
 
@@ -1304,6 +1352,12 @@ class RouteAnalyzer
 
                         if ($name === 'livewire') {
                             $this->handleLivewireRoute($current, $postMiddlewares);
+
+                            return true;
+                        }
+
+                        if ($name === 'match') {
+                            $this->handleMatchRoute($current, $postMiddlewares);
 
                             return true;
                         }
