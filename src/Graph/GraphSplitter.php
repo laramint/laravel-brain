@@ -12,6 +12,7 @@ use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
+use LaraMint\LaravelBrain\Analysis\TableStats;
 
 class TabManifestEntry
 {
@@ -287,9 +288,10 @@ class GraphSplitter
      * relationship. Independent of routes — shows every model in the project.
      *
      * @param  array<string, ModelDefinition>  $models
+     * @param  array<string, TableStats>  $tableStats  Keyed by table name; empty when no database was read.
      * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
      */
-    public function buildErdTab(array $models, string $projectName, string $analyzedAt): ?array
+    public function buildErdTab(array $models, string $projectName, string $analyzedAt, array $tableStats = []): ?array
     {
         if (empty($models)) {
             return null;
@@ -330,6 +332,18 @@ class GraphSplitter
                     ],
                 ],
             ));
+
+            if ($def->table !== '' && isset($tableStats[$def->table])) {
+                $node = $graph->getNode($nodeId);
+                if ($node !== null) {
+                    // `updateNodeData` replaces rather than merges, so the existing payload is
+                    // carried across explicitly.
+                    $graph->updateNodeData($nodeId, [
+                        ...$node->data,
+                        'tableStats' => $tableStats[$def->table]->toArray(),
+                    ]);
+                }
+            }
         }
 
         $seenEdge = [];

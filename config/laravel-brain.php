@@ -459,6 +459,26 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Table Statistics
+    // -------------------------------------------------------------------------
+    // How much data each model's table actually holds, read from the live database
+    // during a scan: total size on every driver Laravel supports, plus a row estimate
+    // and the heap/index split where the driver can answer for them.
+    //
+    // This is the only part of a scan that touches a database. It is written to fail
+    // quietly — no connection, no permission on the catalog, or a driver nobody
+    // anticipated all end as missing numbers rather than a failed scan — so leaving it
+    // on costs nothing where there is nothing to read. Turn it off to skip the queries
+    // entirely, or name a connection when the models do not live on the default one:
+    //
+    //   'connection' => 'tenant',
+    //
+    'table_stats' => [
+        'enabled' => env('LARAVEL_BRAIN_TABLE_STATS', true),
+        'connection' => null,
+    ],
+
+    // -------------------------------------------------------------------------
     // Livewire Component Search Paths
     // -------------------------------------------------------------------------
     // Directories (relative to project root) that are searched when resolving
