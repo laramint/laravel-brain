@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace LaraMint\LaravelBrain\Graph;
 
 use Illuminate\Support\Str;
+use LaraMint\LaravelBrain\Analysis\ActionClasses;
 use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
 use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
 use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
-use LaraMint\LaravelBrain\Analysis\ActionClasses;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
 use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
@@ -116,6 +116,7 @@ class GraphBuilder
 
     /** Whether cache operations are detected and attached at all — see setCacheOperationsEnabled(). */
     private bool $cacheOperationsEnabled = true;
+
     /** @var string[] action-class roots, relative to the project root */
     private array $actionPaths = ActionClasses::DEFAULT_PATHS;
 
