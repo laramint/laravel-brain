@@ -12,6 +12,7 @@ use LaraMint\LaravelBrain\Ai\ContextExporter;
 use LaraMint\LaravelBrain\Ai\RulesExporter;
 use LaraMint\LaravelBrain\Ai\UsageFinder;
 use LaraMint\LaravelBrain\Analysis\ProjectAnalyzer;
+use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Storage\GraphStoreFactory;
 
 class BrainController extends Controller
@@ -231,6 +232,20 @@ class BrainController extends Controller
 
     // ── Stress test ───────────────────────────────────────────────────────────
 
+    /**
+     * Validation rule for the verb the stress panel is firing.
+     *
+     * Derived from {@see RouteAnalyzer::HTTP_VERBS} rather than spelled out a second time: a
+     * route Brain put in the sidebar has to be one the panel can actually run, and a separate
+     * hand-written list is exactly how OPTIONS came to be extractable but un-runnable. HEAD is
+     * appended because the panel offers it even though no route is ever graphed as HEAD — the
+     * analyzer folds it into the GET tab.
+     */
+    public static function stressMethodRule(): string
+    {
+        return 'required|in:'.implode(',', array_merge(RouteAnalyzer::HTTP_VERBS, ['HEAD']));
+    }
+
     public function stressTest(Request $request): JsonResponse
     {
         if (! class_exists('LaraMint\LaravelStress\StressTestRunner')) {
@@ -240,7 +255,7 @@ class BrainController extends Controller
         set_time_limit(120);
 
         $validated = $request->validate([
-            'method' => 'required|in:GET,POST,PUT,PATCH,DELETE,HEAD',
+            'method' => self::stressMethodRule(),
             'url' => 'required|url',
             'count' => 'required|integer|min:1|max:200',
             'concurrency' => 'required|integer|min:1|max:20',

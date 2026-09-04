@@ -3697,14 +3697,18 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
   background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 14px;
 }
-.left-method-chips { display: flex; gap: 5px; padding: 0 12px 10px; }
+/* Wraps because the row is no longer five short words: at the 280px minimum sidebar width seven
+   chips leave ~32px each, and OPTIONS needs ~42px at 10px mono. `flex: 1 1 auto` with a basis of
+   the label lets a short row still fill the width while a long one spills onto a second line
+   instead of clipping "OPTIONS" to "OPTIO". */
+.left-method-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 10px; }
 .method-chip {
-  flex: 1;
+  flex: 1 1 auto;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--faint);
   border-radius: 6px;
-  padding: 4px 0;
+  padding: 4px 6px;
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 600;

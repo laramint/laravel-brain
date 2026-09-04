@@ -9,8 +9,18 @@ interface Props {
   onStressChange: (nodeId: string | null) => void
 }
 
-const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH'])
-const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+// QUERY is here and OPTIONS is not, which is the whole distinction between the two new verbs:
+// QUERY exists precisely so that a *safe* request can carry its query in the body, so a stress
+// run without a body field would be unable to send the request the route is for. OPTIONS carries
+// no body.
+const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'QUERY'])
+// Whether the panel offers the CSRF checkbox at all. QUERY is offered because whether it needs a
+// token depends on the app's Laravel version: `PreventRequestForgery::isReading()` treats it as a
+// read only from the 14.x line (laravel/framework#60655), so on 9 through 13 — where a QUERY route
+// can only be registered via `Route::match(['query'], …)` — the token is still required. Offering
+// an opt-in checkbox is correct on both; withholding it would make the route untestable on one.
+// OPTIONS is exempt on every version.
+const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'QUERY'])
 
 function statusColor(code: string): string {
   const n = parseInt(code, 10)
