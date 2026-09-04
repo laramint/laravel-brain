@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use LaraMint\LaravelBrain\Analysis\ContainerBindingAnalyzer;
 use LaraMint\LaravelBrain\Analysis\ContainerBindingRecord;
 use LaraMint\LaravelBrain\Analysis\ContainerBindingRegistry;
 use LaraMint\LaravelBrain\Analysis\FacadeAnalyzer;
@@ -219,4 +220,24 @@ it('still discovers app/ facades when app is among the configured paths', functi
     expect($registry->get('App\Services\V3\ShortUrlV3Facade'))
         ->toBeInstanceOf(FacadeRecord::class)
         ->accessor->toBe('App\Services\V3\ShortUrlV3Service');
+});
+
+it('resolves a string-key accessor against bindings the analyzer actually produced', function () {
+    // The existing resolveWith() test hands the registry a record it builds by hand. Nothing
+    // could build that record from source: resolveWith() only looks at facades whose accessor
+    // has no namespace separator, and the analyzer only recorded abstracts that had one, so the
+    // two sets were disjoint and the branch was unreachable end to end. Running both analyzers
+    // over the same project is what proves it is reachable now.
+    $bindings = (new ContainerBindingAnalyzer)->analyze(fixture('container-bindings-project'));
+    $facades = (new FacadeAnalyzer)->analyze(fixture('container-bindings-project'));
+
+    // Premise: the accessor really is a bare key, so this is the branch under test.
+    expect($facades->get('App\Facades\LedgerFacade'))
+        ->accessor->toBe('ledger')
+        ->concreteFqcn->toBeNull();
+
+    $facades->resolveWith($bindings);
+
+    expect($facades->get('App\Facades\LedgerFacade'))
+        ->concreteFqcn->toBe('App\Support\Ledger');
 });
