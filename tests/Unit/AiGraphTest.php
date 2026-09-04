@@ -209,9 +209,14 @@ it('leaves no tool and no prompted agent without an edge', function () {
     // ClassifierAgent and DraftAgent are prompted from nowhere and wire no tools, so they really
     // are on their own — an agent no code path reaches is a fact about the application, not a
     // wiring bug, and the AI tab is what keeps them visible anyway.
+    //
+    // Sorted because which of the two comes first is the order the directory was scanned in,
+    // and that differs between filesystems: asserting it passes on APFS and fails on CI's ext4.
+    sort($stranded);
+
     expect($stranded)->toBe([
-        'ai_agent::App\\Ai\\Agents\\DraftAgent',
         'ai_agent::App\\Ai\\Agents\\ClassifierAgent',
+        'ai_agent::App\\Ai\\Agents\\DraftAgent',
     ]);
 });
 
