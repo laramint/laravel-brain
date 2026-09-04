@@ -124,6 +124,27 @@ export interface TableSchemaData {
 }
 
 /** Shape of `node.data.erd` for model nodes in the Model ERD tab. */
+/** What an event promises when it broadcasts, as read from the event class itself. */
+export interface BroadcastChannelData {
+  name: string
+  kind: 'public' | 'private' | 'presence'
+  /** Every segment of the name came from a value, so which channel it is cannot be known. */
+  computed: boolean
+  /** A channel route in this application names the same channel. */
+  declared: boolean
+}
+
+export interface BroadcastData {
+  /** ShouldBroadcast goes through the queue; ShouldBroadcastNow does not. */
+  queued: boolean
+  /** The name subscribers listen for, when broadcastAs() renames it. */
+  alias: string | null
+  customPayload: boolean
+  conditional: boolean
+  queue: string | null
+  channels: BroadcastChannelData[]
+}
+
 export interface ErdModelData {
   table: string
   primaryKey: string

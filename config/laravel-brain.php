@@ -366,6 +366,29 @@ return [
         'enabled' => env('LARAVEL_BRAIN_TRANSACTIONS_ENABLED', true),
     ],
 
+    // -------------------------------------------------------------------------
+    // Broadcasting
+    // -------------------------------------------------------------------------
+    // Which events broadcast, and onto which channels. An event advertises this
+    // itself by implementing ShouldBroadcast, and broadcastOn() names the
+    // channels — so this is read from the class, not from a call chain, and an
+    // event nobody dispatches from a traced path still shows what it broadcasts.
+    //
+    // The channels are matched by shape against the ones routes/channels.php
+    // authorises: `orders.{id}` from the event and `orders.{orderId}` from the
+    // route are the same channel. A channel built from a value only known at
+    // runtime is reported as computed rather than guessed at.
+    //
+    // Override via the LARAVEL_BRAIN_BROADCASTING_ENABLED env variable.
+    //
+    'broadcasting' => [
+        'enabled' => env('LARAVEL_BRAIN_BROADCASTING_ENABLED', true),
+
+        'paths' => [
+            'app/Events',
+        ],
+    ],
+
     'observers' => [
         'model_paths' => [
             'app/Models',

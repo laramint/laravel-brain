@@ -77,6 +77,8 @@ class ProjectAnalyzer
 
     private ObserverAnalyzer $observerAnalyzer;
 
+    private ?BroadcastAnalyzer $broadcastAnalyzer = null;
+
     private PolicyAnalyzer $policyAnalyzer;
 
     private BladeViewAnalyzer $bladeViewAnalyzer;
@@ -168,6 +170,15 @@ class ProjectAnalyzer
             is_array($observerModelPaths) ? $observerModelPaths : [],
             is_array($observerProviderPaths) ? $observerProviderPaths : [],
         );
+
+        // Constructed only when the feature is on, so off means the events are never opened
+        // rather than opened and thrown away.
+        if ((bool) config('laravel-brain.broadcasting.enabled', true)) {
+            $broadcastPaths = config('laravel-brain.broadcasting.paths', ['app/Events']);
+            $this->broadcastAnalyzer = new BroadcastAnalyzer(
+                is_array($broadcastPaths) ? $broadcastPaths : [],
+            );
+        }
 
         $policyProviderPaths = config('laravel-brain.policies.provider_paths', ['app/Providers']);
         $this->policyAnalyzer = new PolicyAnalyzer(
@@ -678,6 +689,9 @@ class ProjectAnalyzer
         );
         $this->graphBuilder->addConsoleCommands($commands, $schedules, $commandEdges);
         $this->graphBuilder->addChannels($channels, $channelEdges);
+        if ($this->broadcastAnalyzer !== null) {
+            $this->graphBuilder->addBroadcasts($this->broadcastAnalyzer->analyze($projectRoot), $channels);
+        }
         $this->graphBuilder->addObservers($observerMap);
         $this->graphBuilder->addPolicies($policyMap);
         if ($filamentResult['detected']) {

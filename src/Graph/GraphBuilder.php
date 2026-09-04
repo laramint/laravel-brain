@@ -10,6 +10,7 @@ use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
 use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
 use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
+use LaraMint\LaravelBrain\Analysis\BroadcastDefinition;
 use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
@@ -2967,6 +2968,118 @@ class GraphBuilder
      * @param  ChannelDefinition[]  $channels
      * @param  CallChainEdge[]  $callEdges  edges discovered by tracing __invoke()/__join() methods
      */
+    /**
+     * Wire each broadcasting event to the channels it goes out on.
+     *
+     * The graph held both ends of this already — events are nodes, and `addChannels()` draws the
+     * channels the application authorises — with nothing between them. This is that edge.
+     *
+     * A channel is matched to a declared one by shape rather than by string: `orders.{id}` from
+     * the event and `orders.{orderId}` from `routes/channels.php` are the same channel, and a
+     * literal comparison would say they are two. Segments must agree one for one, literal against
+     * literal, and a placeholder matches a placeholder — nothing looser, because a rule that let
+     * a placeholder swallow a literal would marry every parameterised channel to every other.
+     *
+     * A channel with no declared counterpart still shows on the event, flagged as undeclared. It
+     * is reported and not judged: an application can authorise a channel from somewhere this pass
+     * does not read, so the honest statement is "no channel route here names it", not "this is
+     * unauthorised".
+     *
+     * @param  array<string, BroadcastDefinition>  $broadcasts
+     * @param  ChannelDefinition[]  $channels
+     */
+    public function addBroadcasts(array $broadcasts, array $channels = []): void
+    {
+        $declared = [];
+
+        foreach ($channels as $channel) {
+            $declared[$channel->name] = 'channel::'.md5($channel->name);
+        }
+
+        foreach ($broadcasts as $fqcn => $definition) {
+            $id = $this->eventId($fqcn);
+            $this->addEventNode($fqcn, $id);
+
+            $node = $this->graph->getNode($id);
+
+            if ($node === null) {
+                continue;
+            }
+
+            $rendered = [];
+
+            foreach ($definition->channels as $channel) {
+                $target = $channel->computed ? null : $this->declaredChannelNode($channel->name, $declared);
+
+                $rendered[] = [
+                    'name' => $channel->name,
+                    'kind' => $channel->kind,
+                    'computed' => $channel->computed,
+                    'declared' => $target !== null,
+                ];
+
+                if ($target !== null) {
+                    $this->addEdge($id, $target, 'broadcasts on', 'event-to-channel');
+                }
+            }
+
+            $this->graph->updateNodeData($id, [...$node->data, 'broadcast' => [
+                'queued' => $definition->queued,
+                'alias' => $definition->alias,
+                'customPayload' => $definition->customPayload,
+                'conditional' => $definition->conditional,
+                'queue' => $definition->queue,
+                'channels' => $rendered,
+            ]]);
+        }
+    }
+
+    /**
+     * The node of the declared channel this name matches, or null when none does.
+     *
+     * @param  array<string, string>  $declared  channel name => node id
+     */
+    private function declaredChannelNode(string $name, array $declared): ?string
+    {
+        foreach ($declared as $candidate => $nodeId) {
+            if ($this->channelNamesMatch($name, $candidate)) {
+                return $nodeId;
+            }
+        }
+
+        return null;
+    }
+
+    private function channelNamesMatch(string $left, string $right): bool
+    {
+        if ($left === $right) {
+            return true;
+        }
+
+        $a = explode('.', $left);
+        $b = explode('.', $right);
+
+        if (count($a) !== count($b)) {
+            return false;
+        }
+
+        foreach ($a as $i => $segment) {
+            $other = $b[$i];
+            $segmentIsPlaceholder = str_starts_with($segment, '{') && str_ends_with($segment, '}');
+            $otherIsPlaceholder = str_starts_with($other, '{') && str_ends_with($other, '}');
+
+            if ($segmentIsPlaceholder !== $otherIsPlaceholder) {
+                return false;
+            }
+
+            if (! $segmentIsPlaceholder && $segment !== $other) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function addChannels(array $channels, array $callEdges = []): void
     {
         // Build a map from channel FQCN → node ID
