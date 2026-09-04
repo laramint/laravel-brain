@@ -235,6 +235,25 @@ return [
     //     "provider_paths" (subscriber subscribe() methods are followed too).
     // So the graph shows what runs when an event dispatches, however it is wired.
     //
+    /*
+    |--------------------------------------------------------------------------
+    | Event choreography
+    |--------------------------------------------------------------------------
+    |
+    | An "Events" tab showing every event the application defines, what listens
+    | to it, and what those listeners fire in turn. Discovery is by directory,
+    | because an event nobody dispatches from a route is still an event — and an
+    | event nobody listens to is the most interesting one on the list.
+    |
+    */
+    'events' => [
+        'enabled' => true,
+
+        'paths' => [
+            'app/Events',
+        ],
+    ],
+
     'listeners' => [
         'paths' => [
             'app/Listeners',

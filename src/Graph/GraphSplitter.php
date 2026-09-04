@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace LaraMint\LaravelBrain\Graph;
 
+use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
 use LaraMint\LaravelBrain\Analysis\ConsoleCommandDefinition;
+use LaraMint\LaravelBrain\Analysis\EventFacts;
 use LaraMint\LaravelBrain\Analysis\FilamentPageDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentPanelDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
@@ -294,6 +296,122 @@ class GraphSplitter
      * @param  array<string, TableSchema>  $schemas  Keyed by table name; empty when no database was read.
      * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
      */
+    /**
+     * A tab for the choreography: every event, what listens to it, and what those listeners fire
+     * in turn.
+     *
+     * Separate from the route tabs on purpose. A route tab answers "what happens when this URL is
+     * hit", and an event's whole point is that its consumers are not on that path — the question
+     * "what does firing this set off" has no route to hang it on, and asking it a route at a time
+     * is how a chain three listeners deep stays invisible.
+     *
+     * @param  CallChainEdge[]  $listenerEdges  event → listener
+     * @param  array<string, list<string>>  $firedBy  listener FQCN => events it dispatches
+     * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
+     */
+    public function buildEventsTab(
+        EventFacts $facts,
+        array $listenerEdges,
+        array $firedBy,
+        string $projectName,
+        string $analyzedAt,
+    ): ?array {
+        $events = $facts->events();
+
+        if ($events === [] && $listenerEdges === []) {
+            return null;
+        }
+
+        $graph = new Graph;
+        $graph->setMeta(['project' => $projectName, 'analyzedAt' => $analyzedAt]);
+
+        foreach ($events as $fqcn => $event) {
+            $graph->addNode(new Node(
+                id: "event::{$fqcn}",
+                type: 'event',
+                label: $event->shortName(),
+                data: [
+                    'fqcn' => $fqcn,
+                    'file' => $event->file,
+                    'event' => $facts->eventPayload($fqcn),
+                ],
+            ));
+        }
+
+        foreach ($listenerEdges as $edge) {
+            $eventId = 'event::'.ltrim($edge->callerFqcn, '\\');
+            $listenerFqcn = ltrim($edge->calleeFqcn, '\\');
+            $listenerId = "listener::{$listenerFqcn}";
+
+            if (! $graph->hasNode($eventId)) {
+                continue;
+            }
+
+            if (! $graph->hasNode($listenerId)) {
+                $graph->addNode(new Node(
+                    id: $listenerId,
+                    type: 'listener',
+                    label: $this->shortName($listenerFqcn),
+                    data: [
+                        'fqcn' => $listenerFqcn,
+                        'listener' => $facts->listenerPayload($listenerFqcn),
+                    ],
+                ));
+            }
+
+            $graph->addEdge(new Edge(
+                id: 'e_'.hash('xxh128', $eventId."\x1f".$listenerId),
+                source: $eventId,
+                target: $listenerId,
+                label: $facts->listenerPayload($listenerFqcn)['queued'] === true ? 'queued' : 'handles',
+                type: 'event-to-listener',
+            ));
+        }
+
+        // The second hop, which is what makes this a choreography rather than a list: a listener
+        // that fires an event of its own continues the chain, and a chain that comes back to an
+        // event it already passed through is a cycle somebody should know about.
+        foreach ($firedBy as $listenerFqcn => $fired) {
+            $listenerId = 'listener::'.ltrim((string) $listenerFqcn, '\\');
+
+            if (! $graph->hasNode($listenerId)) {
+                continue;
+            }
+
+            foreach ($fired as $eventFqcn) {
+                $eventId = 'event::'.ltrim($eventFqcn, '\\');
+
+                if (! $graph->hasNode($eventId)) {
+                    continue;
+                }
+
+                $graph->addEdge(new Edge(
+                    id: 'e_'.hash('xxh128', $listenerId."\x1f".$eventId),
+                    source: $listenerId,
+                    target: $eventId,
+                    label: 'fires',
+                    type: 'listener-to-event',
+                ));
+            }
+        }
+
+        $tabId = 'events--choreography';
+
+        return [
+            'id' => $tabId,
+            'graph' => $graph,
+            'manifest' => new TabManifestEntry(
+                id: $tabId,
+                label: 'Events',
+                routeCount: count($events),
+                nodeCount: $graph->nodeCount(),
+                edgeCount: $graph->edgeCount(),
+                file: ".graph-{$tabId}.json",
+                category: 'Events',
+            ),
+        ];
+    }
+
     public function buildErdTab(
         array $models,
         string $projectName,

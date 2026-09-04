@@ -1,5 +1,6 @@
 <?php
 
+use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ContainerBindingAnalyzer;
 use LaraMint\LaravelBrain\Analysis\ControllerAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
@@ -205,4 +206,30 @@ it('keeps every existing edge id when a new edge appears', function () {
 
     expect(array_diff($before, $after))->toBe([])
         ->and(count($after))->toBe(count($before) + 1);
+});
+
+it('hangs a listener off the canonical event node, not a mangled duplicate', function () {
+    // A listener edge is the one hop whose caller is a class nobody calls. Given the generic
+    // treatment its caller id becomes `app_events_orderplaced::__construct`, while every graph
+    // that shows the event shows `event::App\Events\OrderPlaced` — two nodes for one class, with
+    // the listener on the one no route can reach. Measured before the fix: 102 route tabs carried
+    // an event node and not one carried a listener.
+    $edges = [new CallChainEdge('App\\Events\\OrderPlaced', '__construct', 'App\\Listeners\\Notify', 'handle', 'listener')];
+
+    $graph = (new GraphBuilder)->build('test', [], new MiddlewareRegistry([], [], []), [], $edges, []);
+
+    $sources = array_map(fn (Edge $e): string => $e->source, $graph->edges());
+
+    expect($sources)->toContain('event::App\\Events\\OrderPlaced')
+        ->and($sources)->not->toContain('app_events_orderplaced::__construct');
+});
+
+it('creates the listener as a node of its own type', function () {
+    $edges = [new CallChainEdge('App\\Events\\OrderPlaced', '__construct', 'App\\Listeners\\Notify', 'handle', 'listener')];
+
+    $graph = (new GraphBuilder)->build('test', [], new MiddlewareRegistry([], [], []), [], $edges, []);
+
+    $types = array_map(fn (Node $n): string => $n->type, $graph->nodes());
+
+    expect($types)->toContain('listener')->toContain('event');
 });

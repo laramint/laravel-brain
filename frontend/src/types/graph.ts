@@ -30,7 +30,7 @@ export interface GraphNodeMetrics {
 
 export interface GraphNode {
   id: string
-  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager'
+  type: 'route' | 'middleware' | 'controller' | 'livewire_component' | 'action' | 'service' | 'validation_request' | 'model' | 'event' | 'listener' | 'job' | 'command' | 'channel' | 'schedule' | 'view' | 'mail' | 'notification' | 'enum' | 'interface' | 'trait' | 'abstract_class' | 'service_provider' | 'facade' | 'filament_panel' | 'filament_resource' | 'filament_page' | 'filament_page_method' | 'filament_widget' | 'filament_relation_manager'
   label: string
   data: Record<string, unknown>
 }
@@ -197,3 +197,19 @@ export interface NodeUsages {
 export interface StressTestConfig { method: string; url: string; count: number; concurrency: number; headers: Record<string, string>; body: string; timeout: number }
 export interface StressTestTiming { min: number; max: number; avg: number; p50: number; p95: number; p99: number }
 export interface StressTestResult { total: number; succeeded: number; failed: number; successRate: number; errorRate: number; throughput: number; timing: StressTestTiming; statusDistribution: Record<string, number>; errors: string[]; wallTimeMs: number }
+
+export interface EventNodeData {
+  fqcn: string
+  file: string
+  deferred: boolean
+  broadcast: boolean
+  properties: string[]
+  listenerCount: number
+  orphan: boolean
+  observableBeforeCommit: boolean
+}
+
+export interface ListenerNodeData {
+  queued: boolean
+  deferred: boolean
+}

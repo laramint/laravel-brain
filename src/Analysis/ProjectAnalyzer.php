@@ -50,6 +50,9 @@ class ProjectAnalyzer
 
     private ListenerAnalyzer $listenerAnalyzer;
 
+    /** @var list<string> */
+    private array $listenerPaths;
+
     private ObserverAnalyzer $observerAnalyzer;
 
     private PolicyAnalyzer $policyAnalyzer;
@@ -105,6 +108,7 @@ class ProjectAnalyzer
             : SourceDirectories::DEFAULT_SOURCE_PATHS;
 
         $listenerPaths = config('laravel-brain.listeners.paths', ['app/Listeners']);
+        $this->listenerPaths = is_array($listenerPaths) ? array_values($listenerPaths) : ['app/Listeners'];
         $providerPaths = config('laravel-brain.listeners.provider_paths', ['app/Providers']);
         $this->listenerAnalyzer = new ListenerAnalyzer(
             is_array($listenerPaths) ? $listenerPaths : [],
@@ -382,7 +386,8 @@ class ProjectAnalyzer
         }
 
         // Link dispatched events to the listeners that handle them.
-        foreach ($this->listenerAnalyzer->analyze($projectRoot, $psr4Map) as $edge) {
+        $listenerEdges = $this->listenerAnalyzer->analyze($projectRoot, $psr4Map);
+        foreach ($listenerEdges as $edge) {
             $callChain[] = $edge;
         }
 
@@ -591,6 +596,33 @@ class ProjectAnalyzer
 
         $this->emit('step:done', ['step' => 'graph', 'count' => $fullGraph->nodeCount(), 'unit' => 'node', 'extra' => $fullGraph->edgeCount().' edges', 'message' => "    {$fullGraph->nodeCount()} nodes, {$fullGraph->edgeCount()} edges"]);
 
+        // Computed before the split so the facts reach every subgraph, not only the events tab:
+        // a route graph shows the events that request dispatches, and those nodes carried nothing
+        // but a name and a file until they were stamped here.
+        $eventsEnabled = (bool) config('laravel-brain.events.enabled', true);
+        $eventAnalyzer = null;
+        $eventFacts = null;
+
+        if ($eventsEnabled) {
+            $eventPaths = config('laravel-brain.events.paths', EventAnalyzer::DEFAULT_PATHS);
+            $eventAnalyzer = new EventAnalyzer(
+                is_array($eventPaths) ? array_values($eventPaths) : EventAnalyzer::DEFAULT_PATHS,
+                $this->listenerPaths,
+            );
+
+            $events = $eventAnalyzer->analyze($projectRoot);
+
+            // An event kept outside the configured directories is still an event once something
+            // listens to it, and the listener edge names it. Added without a definition rather
+            // than skipped, so the choreography stays whole.
+            foreach (EventAnalyzer::fqcnsFrom($listenerEdges) as $fqcn) {
+                $events[$fqcn] ??= new EventDefinition(fqcn: $fqcn);
+            }
+
+            $eventFacts = new EventFacts($events, $listenerEdges, new QueueDeferral);
+            $eventFacts->stamp($fullGraph);
+        }
+
         $this->emit('step:start', ['step' => 'split', 'label' => 'Splitting into tab subgraphs', 'message' => '  → Splitting into tab subgraphs...']);
         $split = $this->graphSplitter->split($fullGraph, $routes, $commands, $channels, $schedules, $projectName, $analyzedAt, $filamentResult['panels'], $filamentResult['resources'], $filamentResult['pages']);
 
@@ -605,6 +637,21 @@ class ProjectAnalyzer
         if ($erd !== null) {
             $split['subgraphs'][$erd['id']] = $erd['graph'];
             $split['manifest'][] = $erd['manifest'];
+        }
+
+        if ($eventFacts !== null && $eventAnalyzer !== null) {
+            $eventsTab = $this->graphSplitter->buildEventsTab(
+                $eventFacts,
+                $listenerEdges,
+                $eventAnalyzer->firedBy($projectRoot, $eventFacts->events()),
+                $projectName,
+                $analyzedAt,
+            );
+
+            if ($eventsTab !== null) {
+                $split['subgraphs'][$eventsTab['id']] = $eventsTab['graph'];
+                $split['manifest'][] = $eventsTab['manifest'];
+            }
         }
 
         $this->emit('step:done', ['step' => 'split', 'count' => count($split['subgraphs']), 'unit' => 'tab', 'message' => '    '.count($split['subgraphs']).' tab(s) generated']);

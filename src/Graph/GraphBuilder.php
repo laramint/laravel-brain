@@ -563,6 +563,21 @@ class GraphBuilder
         //   OrderService::createOrder → SendOrderConfirmationJob::handle (job)
 
         foreach ($callChain as $edge) {
+            // A listener edge is the one hop whose caller is a class nobody calls: the event.
+            // `nodeIdForHop` would mangle it to `filamerce_sale_events_orderitemcreated::__construct`
+            // while every graph that shows the event shows `event::FQCN` — two nodes for one class,
+            // with the listener hanging off the one no route can reach. Measured before this: 102
+            // route tabs carried an event node and not one carried a listener. Same fix the model
+            // observers already use, for the same reason.
+            if ($edge->type === 'listener') {
+                $eventNode = $this->eventId($edge->callerFqcn);
+                $this->addEventNode($edge->callerFqcn, $eventNode);
+                $this->ensureNode($edge->calleeFqcn, $edge->calleeMethod, 'listener', $models);
+                $this->addEdge($eventNode, $this->hopCalleeNodeId($edge), 'handled by', 'event-to-listener');
+
+                continue;
+            }
+
             $callerNode = $this->nodeIdForHop($edge->callerFqcn, $edge->callerMethod);
             $calleeNode = $this->hopCalleeNodeId($edge);
 
@@ -649,6 +664,7 @@ class GraphBuilder
             'view' => $this->viewNodeId($fqcn),
             'interface' => $method !== '' ? $this->nodeIdForHop($fqcn, $method) : $this->interfaceNodeId($fqcn),
             'trait' => $this->traitNodeId($fqcn),
+            'event' => $this->eventId($fqcn),
             default => $this->nodeIdForHop($fqcn, $method),
         };
         if ($this->graph->hasNode($id)) {
@@ -796,7 +812,10 @@ class GraphBuilder
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
                 $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
-                $this->graph->addNode(new Node($id, 'event', $method ? "{$short}@{$method}" : $short, [
+                // Named for the class, never `Event@__construct`: the id no longer separates one
+                // method from another, so a label naming one would claim a distinction the node
+                // does not make.
+                $this->graph->addNode(new Node($id, 'event', $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'file' => $file,
@@ -1091,6 +1110,11 @@ class GraphBuilder
             'view' => $this->viewNodeId($edge->calleeFqcn),
             'interface' => $this->nodeIdForHop($edge->calleeFqcn, $edge->calleeMethod),
             'trait' => $this->traitNodeId($edge->calleeFqcn),
+            // The event a chain dispatches is the same event its listeners hang off, so it must
+            // resolve to the one canonical id. Left as `Fqcn::__construct`, the dispatch put a
+            // second node on the tab and the listeners stayed on the first one — reachable from
+            // the full graph and from no route tab at all.
+            'event' => $this->eventId($edge->calleeFqcn),
             default => $this->nodeIdForHop($edge->calleeFqcn, $edge->calleeMethod),
         };
     }

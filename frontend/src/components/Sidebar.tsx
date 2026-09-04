@@ -274,12 +274,16 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'erd' &&
       key !== 'tableStats' &&
       key !== 'schema' &&
+      key !== 'event' &&
+      key !== 'listener' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
   const erd = node.data?.erd as import('../types/graph').ErdModelData | undefined
   const tableStats = node.data?.tableStats as import('../types/graph').TableStatsData | undefined
   const tableSchema = node.data?.schema as import('../types/graph').TableSchemaData | undefined
+  const event = node.data?.event as import('../types/graph').EventNodeData | undefined
+  const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -632,6 +636,60 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                   <div className="prop-row"><span className="prop-key">table</span><span className="prop-value">{formatBytes(tableStats.tableBytes)}</span></div>
                   <div className="prop-row"><span className="prop-key">indexes</span><span className="prop-value">{formatBytes(tableStats.indexBytes)}</span></div>
                   <div className="prop-row"><span className="prop-key">total</span><span className="prop-value">{formatBytes(tableStats.totalBytes)}</span></div>
+                </div>
+              )}
+
+              {event && (
+                <div className="sidebar-section">
+                  <h3>Event</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">listeners</span>
+                    <span className="prop-value">
+                      {event.orphan
+                        ? 'none — firing this does nothing'
+                        : `${event.listenerCount}`}
+                    </span>
+                  </div>
+                  <div className="prop-row">
+                    <span className="prop-key">dispatch</span>
+                    <span className="prop-value">
+                      {event.deferred ? 'after commit (ShouldDispatchAfterCommit)' : 'immediate'}
+                    </span>
+                  </div>
+                  {event.broadcast && (
+                    <div className="prop-row"><span className="prop-key">broadcast</span><span className="prop-value">yes</span></div>
+                  )}
+                  {!event.orphan && (
+                    <div className="prop-row">
+                      <span className="prop-key">before commit</span>
+                      <span className="prop-value">
+                        {event.observableBeforeCommit
+                          ? 'a listener can act before a surrounding transaction commits'
+                          : 'no listener runs before the commit'}
+                      </span>
+                    </div>
+                  )}
+                  {event.properties?.length > 0 && (
+                    <div className="prop-row"><span className="prop-key">payload</span><span className="prop-value">{event.properties.join(', ')}</span></div>
+                  )}
+                </div>
+              )}
+
+              {listener && (
+                <div className="sidebar-section">
+                  <h3>Listener</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">runs</span>
+                    <span className="prop-value">{listener.queued ? 'on a queue' : 'in the dispatching request'}</span>
+                  </div>
+                  {listener.queued && (
+                    <div className="prop-row">
+                      <span className="prop-key">waits for commit</span>
+                      <span className="prop-value">
+                        {listener.deferred ? 'yes (queue after_commit)' : 'no'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
