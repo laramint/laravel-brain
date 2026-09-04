@@ -78,6 +78,7 @@ class ProjectAnalyzer
     private ObserverAnalyzer $observerAnalyzer;
 
     private ?BroadcastAnalyzer $broadcastAnalyzer = null;
+
     private ?MacroAnalyzer $macroAnalyzer = null;
 
     private PolicyAnalyzer $policyAnalyzer;
