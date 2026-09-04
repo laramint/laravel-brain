@@ -14,6 +14,7 @@ class ContextExporter
         'route', 'controller', 'action', 'validation_request', 'service',
         'model', 'event', 'job', 'command', 'channel', 'schedule', 'middleware',
         'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
+        'ai_agent', 'ai_tool',
         'filament_panel', 'filament_resource', 'filament_page', 'filament_widget', 'filament_relation_manager',
     ];
 
@@ -278,6 +279,23 @@ class ContextExporter
             $parts[] = '';
         }
 
+        // Cache Operations
+        //
+        // Worth the characters for the same reason the DB section is: an agent asked to change
+        // what a method returns cannot see from the source excerpt alone that the value is
+        // served from cache, or which other method clears the key it writes.
+        $allCacheOps = [];
+        foreach ($ctx->nodes as $node) {
+            foreach (($node['data']['cacheOps'] ?? []) as $operation) {
+                $allCacheOps[] = '- '.$this->describeCacheOperation($operation)." (in {$node['label']})";
+            }
+        }
+        if (! empty($allCacheOps)) {
+            $parts[] = '## Cache Operations';
+            $parts[] = implode("\n", $allCacheOps);
+            $parts[] = '';
+        }
+
         // Pre-budget structural content (always included)
         $structural = implode("\n", $parts);
         $charBudget -= strlen($structural);
@@ -539,6 +557,42 @@ class ContextExporter
         }
 
         return [];
+    }
+
+    /**
+     * One cache operation as a line of prose: `read remember "users:{$id}" ttl=600 store=redis`.
+     *
+     * A computed key is spelled out as such rather than omitted. "This method reads a key we
+     * could not determine" is a different and more useful fact than silence, which reads as
+     * "this method does not use the cache".
+     *
+     * @param  array<string, mixed>  $operation
+     */
+    private function describeCacheOperation(array $operation): string
+    {
+        $kind = (string) ($operation['kind'] ?? '?');
+        $method = (string) ($operation['method'] ?? '?');
+        $keyKind = (string) ($operation['keyKind'] ?? 'computed');
+        $key = (string) ($operation['key'] ?? '');
+
+        $line = $kind.' '.$method;
+        $line .= match ($keyKind) {
+            'none' => '',
+            'computed' => ' (computed key)',
+            default => ' "'.$key.'"',
+        };
+
+        if (! empty($operation['tags']) && is_array($operation['tags'])) {
+            $line .= ' tags='.implode(',', array_map('strval', $operation['tags']));
+        }
+        if (! empty($operation['store'])) {
+            $line .= ' store='.$operation['store'];
+        }
+        if (isset($operation['ttl'])) {
+            $line .= ' ttl='.$operation['ttl'].'s';
+        }
+
+        return $line;
     }
 
     // ── Call chain builder ────────────────────────────────────────────────────

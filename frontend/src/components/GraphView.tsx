@@ -15,7 +15,10 @@ import {
   SECURITY_EXPOSURE_COLORS,
   SECURITY_EXPOSURE_COLORS_LIGHT,
   SECURITY_RISK_COLORS,
+  TRANSACTION_FRAME,
+  ROLLBACK_FRAME,
 } from '../utils/graphConstants'
+import { transactionRegions } from '../utils/transactionRegions'
 import {
   type LayoutEdge,
   type LayoutNode,
@@ -413,6 +416,7 @@ export function GraphView({
 
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
+
   // ── Per-node drag overrides ────────────────────────────────────────────────
   const [draggedPositions, setDraggedPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const dragStateRef = useRef<{
@@ -442,6 +446,15 @@ export function GraphView({
       return pos ? { ...n, x: pos.x, y: pos.y } : n
     })
   }, [nodes, draggedPositions])
+
+  // Computed from the DRAGGED positions, not the laid-out ones: a region is a shape over where
+  // the cards actually are, and a boundary that stays behind when somebody moves a node out of it
+  // is worse than no boundary — it keeps claiming a membership that is no longer on screen.
+  const transactionAreas = useMemo(() => transactionRegions(effectiveNodes), [effectiveNodes])
+
+  // Toggled from the same footer as the node types: a boundary is one more thing on the canvas,
+  // and anything on the canvas should be something a reader can turn off.
+  const showTransactions = visibleTypes.has('transaction')
 
   const effectiveNodeById = useMemo(
     () => new Map(effectiveNodes.map((n) => [n.id, n])),
@@ -1140,6 +1153,65 @@ export function GraphView({
             onClick={tapBg}
             style={{ pointerEvents: 'all' }}
           />
+          {/* Transaction regions, under the edges and the cards: a boundary is context, and
+              context that draws over the thing it describes stops being context.
+
+              Exactly one of the two marks is drawn at a time. The hull says it best when it can
+              be drawn at all — it can only be, when it encloses nothing that was not in the span
+              — and outlining the members underneath it would say the same thing twice. When the
+              hull cannot be drawn, the outlines carry membership on their own, and the name moves
+              onto them for the same reason. */}
+          {showTransactions && transactionAreas.map((region) => {
+            const stroke = region.kind === 'rollback' ? ROLLBACK_FRAME : TRANSACTION_FRAME
+            const dash = region.kind === 'rollback' ? '2 4' : '6 5'
+            const name = `${region.kind === 'rollback' ? 'rollback' : 'transaction'} ${region.index}`
+
+            return (
+              <g key={region.id} style={{ pointerEvents: 'none' }}>
+                {region.pure && (
+                  <polygon
+                    points={region.points.map(([x, y]) => `${x},${y}`).join(' ')}
+                    fill={stroke} fillOpacity={0.05}
+                    stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} opacity={0.55}
+                  />
+                )}
+
+                {!region.pure && region.members.map((m) => (
+                  <rect key={m.id}
+                    x={m.x - m.width / 2 - 5} y={m.y - m.height / 2 - 5}
+                    width={m.width + 10} height={m.height + 10} rx={13}
+                    fill="none" stroke={stroke} strokeWidth={1.5}
+                    strokeDasharray={dash} opacity={0.85} />
+                ))}
+
+                {/* The name goes wherever it can be read as belonging to something. On the hull
+                    once, because the shape already groups the members. Without a hull the members
+                    are only outlines scattered across the canvas, and one floating label beside
+                    the topmost of them names nothing — so each carries its own. */}
+                {region.pure ? (
+                  <text
+                    x={Math.min(...region.points.map(([x]) => x)) + 10}
+                    y={Math.min(...region.points.map(([, y]) => y)) - 6}
+                    fontSize={10} fontFamily="ui-monospace, monospace"
+                    fill={stroke} opacity={0.9}
+                  >
+                    {name}
+                  </text>
+                ) : (
+                  region.members.map((m) => (
+                    <text key={`${m.id}-label`}
+                      x={m.x - m.width / 2 - 4} y={m.y - m.height / 2 - 10}
+                      fontSize={9} fontFamily="ui-monospace, monospace"
+                      fill={stroke} opacity={0.85}
+                    >
+                      {name}
+                    </text>
+                  ))
+                )}
+              </g>
+            )
+          })}
+
           {edges.map((e) => {
             if (!edgeVisible(e)) return null
             if (collapsedNodes.has(e.source) || hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target)) return null
@@ -1550,6 +1622,19 @@ export function GraphView({
             {i < arr.length - 1 && <span className="g-crumb-arrow">→</span>}
           </span>
         ))}
+
+        {/* Listed only where there is one to see, and after a separator rather than an arrow:
+            the chain above is a sequence a request passes through, and a transaction is not a
+            step in it. Joining it with an arrow would say it comes after the implementation. */}
+        {showTransactions && transactionAreas.length > 0 && (
+          <span className="g-crumb g-crumb--aside">
+            <span className="g-crumb-sep">·</span>
+            <span className="g-crumb-dot g-crumb-dot--dashed" style={{ borderColor: TRANSACTION_FRAME }} />
+            {transactionAreas.length === 1
+              ? 'transaction'
+              : `${transactionAreas.length} transactions`}
+          </span>
+        )}
       </div>
 
       <div className="g-zoom">

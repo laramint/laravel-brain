@@ -50,6 +50,7 @@ Navigate to `/_laravel-brain` in your browser while your Laravel app is running 
 | View flowchart | Click a class node → Flow tab |
 | Flowchart popup | Click ⤢ in flow section to open large view |
 | View sequence diagram | Click a route node → Sequence Diagram section in sidebar |
+| See what a method caches | Click a node → Info tab → Cache section |
 | Filter by type | Filter panel on the left |
 | Fit all nodes | Toolbar → Fit button |
 | Export PNG | Toolbar → Export → Download PNG |
@@ -97,6 +98,7 @@ The exported Markdown contains:
 - **Call chain** — `Route → Controller → Service → Model` (depth ≤ 3)
 - **Complexity hotspots** — cyclomatic complexity + line count table
 - **Database operations** — Eloquent and raw queries per node
+- **Cache operations** — read / write / invalidate / lock per node, with key, tags, store and TTL
 - **Source snippets** — focal node first, truncated to fit the token budget
 - **Backend packages** — all `composer.json` dependencies with versions, dev flag
 - **Frontend packages** — all `package.json` dependencies with versions, dev flag

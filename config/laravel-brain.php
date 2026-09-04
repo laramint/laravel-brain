@@ -274,6 +274,29 @@ return [
     // So the graph shows which observer runs on a model's lifecycle events,
     // however it is wired.
     //
+    // -------------------------------------------------------------------------
+    // Database Transactions
+    // -------------------------------------------------------------------------
+    // Whether call chains are read for the transaction spans they run inside, so
+    // the canvas can draw a boundary around the work that commits or rolls back
+    // together.
+    //
+    // What it costs: the detector walks every method body the tracer scans, and
+    // it walks them whether or not the application opens a single transaction.
+    // Measured on a synthetic corpus containing no `DB::transaction` at all:
+    // +8.2% on a full 1,185-file scan, of which the lifecycle phase is +36%.
+    // That is the price of being told there is nothing to draw; an application
+    // that does use transactions pays it plus the real work.
+    //
+    // Turning it off skips the traversal rather than discarding its result, so
+    // off costs nothing at all.
+    //
+    // Override via the LARAVEL_BRAIN_TRANSACTIONS_ENABLED env variable.
+    //
+    'transactions' => [
+        'enabled' => env('LARAVEL_BRAIN_TRANSACTIONS_ENABLED', true),
+    ],
+
     'observers' => [
         'model_paths' => [
             'app/Models',
@@ -353,6 +376,35 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Morph Map Aliases
+    // -------------------------------------------------------------------------
+    // Shows each model the short alias `Relation::morphMap()` gives it — the value
+    // that actually lands in your `*_type` columns, and so the one you hold when
+    // you arrive from a row or a query — beside the other facts on the model's
+    // detail panel. Where the application calls `requireMorphMap()`, a model left
+    // out of the map is flagged: there is no fallback to the class name, so the
+    // first `getMorphClass()` call on it throws.
+    //
+    // Unlike everything else in this file, this one fact is read from the RUNNING
+    // application rather than parsed out of your source. A scan runs inside your
+    // own app, so `Relation::morphMap()` already holds the whole answer — including
+    // aliases a package registered in its own provider, a config value supplied, or
+    // a branch only one environment takes, none of which a file parser can see.
+    //
+    // It costs a single read of a static array, once per scan, so scan time is not
+    // the reason to turn it off. The reason is the other one: this is the escape
+    // hatch if you would rather the scanner did not touch framework state at all.
+    // Off means `Relation::morphMap()` is never consulted — not consulted and the
+    // answer discarded. Your models still appear; they simply carry no alias, and
+    // nothing is flagged as missing one.
+    //
+    // Override via the LARAVEL_BRAIN_MORPH_MAP_ENABLED env variable.
+    //
+    'morph_map' => [
+        'enabled' => env('LARAVEL_BRAIN_MORPH_MAP_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // Filament Search Paths
     // -------------------------------------------------------------------------
     // Directories (relative to the project root) scanned for Filament panels and
@@ -383,6 +435,35 @@ return [
         'paths' => [
             'app/Filament',
         ],
+    ],
+
+    // -------------------------------------------------------------------------
+    // laravel/ai Agents
+    // -------------------------------------------------------------------------
+    // Puts the application's LLM calls on the graph: one node per `laravel/ai`
+    // agent and per tool it exposes to the model, with the model, provider and
+    // limits each agent will run under.
+    //
+    // 'enabled' is a different question from whether the application uses the SDK
+    // at all. Brain answers that one itself, and the pass is already inert without
+    // it: every source file is tested for the literal string `Laravel\Ai\` before
+    // anything is parsed, so a project that does not use the SDK pays one read per
+    // source file and contributes no nodes. Turn this off when the application DOES
+    // use it and you still want the pass skipped — to keep agents out of an exported
+    // graph, or to drop the one read-and-search per source file on a very large tree.
+    // Off skips the scan entirely rather than discarding its result.
+    //
+    // Override via the LARAVEL_BRAIN_AI_ENABLED env variable.
+    //
+    // 'paths' is where agents are looked for. Leave it unset and the Source Paths
+    // below are used, which is right for almost every project — agents are ordinary
+    // application classes and need no directory of their own. Glob patterns are
+    // expanded, as above:
+    //
+    //   'paths' => ['app-modules/*/src'],
+    //
+    'ai' => [
+        'enabled' => env('LARAVEL_BRAIN_AI_ENABLED', true),
     ],
 
     // -------------------------------------------------------------------------
@@ -552,6 +633,41 @@ return [
             'app/Livewire',
             'app/View/Components',
         ],
+    ],
+
+    // -------------------------------------------------------------------------
+    // Cache Operations
+    // -------------------------------------------------------------------------
+    // Detect calls to the `Cache` facade and the `cache()` helper while charting a
+    // method, and show them on the node: the operation kind (read / write /
+    // invalidate / lock), the key where it can be read from the source, and any
+    // declared tags, store and TTL.
+    //
+    // On by default. Turning it off is off at the source — no statement is inspected
+    // for a cache call at all — rather than a filter over results that were computed
+    // anyway.
+    //
+    // What it costs. The work happens inside flow extraction, so measure it there
+    // rather than against a whole scan. Over the benchmark suite's 1,185-file corpus
+    // (5,571 methods, no cache calls in it) flow extraction goes from 11.5 ms to
+    // 14.2 ms — the cost of looking and finding nothing. Over source saturated with
+    // cache calls (1,000 methods, six calls each) it goes from 9.9 ms to 18.4 ms.
+    // Against a full scan of that same 1,185-file corpus — 494 ms — neither delta is
+    // measurable above the run-to-run noise.
+    //
+    // So turn it off for a reason other than speed:
+    //   - the application does not use Laravel's cache, and the section would never
+    //     have anything to say;
+    //   - caching is wrapped in your own abstraction rather than the facade, so what
+    //     Brain can see is a misleading fraction of what the application actually
+    //     caches — a half-true panel is worse than no panel;
+    //   - you are diffing two scans and want the graph to hold still across a change
+    //     to this detection.
+    //
+    // Override via the LARAVEL_BRAIN_CACHE_OPERATIONS_ENABLED env variable.
+    //
+    'cache_operations' => [
+        'enabled' => env('LARAVEL_BRAIN_CACHE_OPERATIONS_ENABLED', true),
     ],
 
     // -------------------------------------------------------------------------

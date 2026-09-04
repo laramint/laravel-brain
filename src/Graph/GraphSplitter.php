@@ -455,6 +455,8 @@ class GraphSplitter
                         'appends' => $def->appends,
                         'accessors' => $def->accessors,
                         'relationships' => $def->relationships,
+                        'morphAlias' => $def->morphAlias,
+                        'morphAliasMissing' => $def->morphAliasMissing,
                     ],
                 ],
             ));
@@ -539,6 +541,117 @@ class GraphSplitter
                 category: 'ERD',
             ),
         ];
+    }
+
+    /**
+     * Build the standalone "AI Agents" tab: every `laravel/ai` agent, the tools it can call, and
+     * the methods that prompt it.
+     *
+     * A tab of its own, rather than relying on the route walk, because measurement said the route
+     * walk never gets there. On a real application with 5 agents and 17 tools, every call site
+     * resolved to a queued job, a service or a listener helper that no route reaches statically —
+     * so all 22 AI nodes sat in the full graph and in **no tab at all**, which is the same as
+     * being absent for anyone looking at the UI. Wiring the caller edges (which was a real bug,
+     * and is fixed) moved that number from 22 isolated to 0 isolated and still 22 invisible.
+     *
+     * Assembled node by node like the ERD tab rather than by walking forward from a seed: a
+     * forward walk out of a caller would drag in that method's whole downstream subtree, and this
+     * screen answers one question — which code talks to an LLM, using what.
+     *
+     * @return array{id: string, graph: Graph, manifest: TabManifestEntry}|null
+     */
+    public function buildAiTab(Graph $fullGraph, string $projectName, string $analyzedAt): ?array
+    {
+        $agentCount = 0;
+        foreach ($fullGraph->nodes() as $node) {
+            if ($node->type === 'ai_agent') {
+                $agentCount++;
+            }
+        }
+
+        if ($agentCount === 0) {
+            return null;
+        }
+
+        $graph = new Graph;
+        $graph->setMeta(['project' => $projectName, 'analyzedAt' => $analyzedAt]);
+
+        foreach ($fullGraph->nodes() as $node) {
+            if ($node->type === 'ai_agent' || $node->type === 'ai_tool') {
+                $graph->addNode($node);
+            }
+        }
+
+        foreach ($fullGraph->edges() as $edge) {
+            if (! str_starts_with($edge->type, 'ai-')) {
+                continue;
+            }
+
+            // The caller is whatever the rest of the graph made it — a job, a service, a
+            // controller action. It is pulled in as-is so the tab shows where the call comes from.
+            foreach ([$edge->source, $edge->target] as $endpoint) {
+                if (! $graph->hasNode($endpoint)) {
+                    $node = $fullGraph->getNode($endpoint);
+                    if ($node !== null) {
+                        $graph->addNode($node);
+                    }
+                }
+            }
+
+            if ($graph->hasNode($edge->source) && $graph->hasNode($edge->target)) {
+                $graph->addEdge($edge);
+            }
+        }
+
+        $tabId = 'ai--agents';
+
+        return [
+            'id' => $tabId,
+            'graph' => $graph,
+            'manifest' => new TabManifestEntry(
+                id: $tabId,
+                label: 'AI Agents',
+                routeCount: $agentCount,
+                nodeCount: $graph->nodeCount(),
+                edgeCount: $graph->edgeCount(),
+                file: ".graph-{$tabId}.json",
+                category: 'AI',
+            ),
+        ];
+    }
+
+    /**
+     * Nodes of the full graph that reached none of the tabs, counted by type.
+     *
+     * The stricter companion to {@see Graph::isolatedNodeCountsByType()}, and the one that
+     * actually predicts what a reader sees: a node can be correctly wired to its neighbours and
+     * still sit in a cluster no tab seed reaches. Measured on a real application, the isolated
+     * count would have reported nothing wrong while 22 nodes were invisible.
+     *
+     * @param  array<string, Graph>  $subgraphs
+     * @return array<string, int> node type => count, highest first
+     */
+    public static function nodesOutsideTabs(Graph $fullGraph, array $subgraphs): array
+    {
+        $shown = [];
+
+        foreach ($subgraphs as $subgraph) {
+            foreach ($subgraph->nodes() as $node) {
+                $shown[$node->id] = true;
+            }
+        }
+
+        $counts = [];
+
+        foreach ($fullGraph->nodes() as $node) {
+            if (! isset($shown[$node->id])) {
+                $counts[$node->type] = ($counts[$node->type] ?? 0) + 1;
+            }
+        }
+
+        arsort($counts);
+
+        return $counts;
     }
 
     private function shortName(string $fqcn): string

@@ -1,6 +1,7 @@
 <?php
 
 use LaraMint\LaravelBrain\Analysis\ModelAnalyzer;
+use LaraMint\LaravelBrain\Analysis\MorphMap;
 
 it('detects dispatchesEvents on Order model', function () {
     $analyzer = new ModelAnalyzer;
@@ -47,4 +48,47 @@ it('resolves a related model in the same namespace', function () {
 
     expect($related)->toContain('App\\Models\\User')
         ->and($related)->not->toContain('User');
+});
+
+it('carries the alias the application registered for the model', function () {
+    $models = (new ModelAnalyzer([], new MorphMap(['order' => 'App\\Models\\Order'])))
+        ->analyze(fixture('laravel-project'), ['App\\Models\\Order']);
+
+    expect($models['App\\Models\\Order']->morphAlias)->toBe('order');
+});
+
+it('leaves the alias unset for a model no map names', function () {
+    $models = (new ModelAnalyzer([], new MorphMap(['parcel' => 'App\\Models\\Parcel'])))
+        ->analyze(fixture('laravel-project'), ['App\\Models\\Order']);
+
+    expect($models['App\\Models\\Order']->morphAlias)->toBeNull()
+        ->and($models['App\\Models\\Order']->morphAliasMissing)->toBeFalse();
+});
+
+it('flags a model left out of an enforced morph map', function () {
+    // Under `enforceMorphMap()` there is no fallback to the class name — the first
+    // `getMorphClass()` call on this model throws ClassMorphViolationException.
+    $models = (new ModelAnalyzer([], new MorphMap(['parcel' => 'App\\Models\\Parcel'], true)))
+        ->analyze(fixture('laravel-project'), ['App\\Models\\Order']);
+
+    expect($models['App\\Models\\Order']->morphAliasMissing)->toBeTrue();
+});
+
+it('does not flag an abstract model an enforced map leaves out', function () {
+    // An abstract class cannot be instantiated, so no `getMorphClass()` call can ever reach it
+    // and a map that omits it is correct rather than incomplete. Measured on a 60-module
+    // application, 2 of the 48 models this flagged were abstract base classes.
+    $models = (new ModelAnalyzer([], new MorphMap(['order' => 'App\\Models\\Order'], true)))
+        ->analyze(fixture('laravel-project'), ['App\\Models\\BaseEntity']);
+
+    expect($models['App\\Models\\BaseEntity']->morphAlias)->toBeNull()
+        ->and($models['App\\Models\\BaseEntity']->morphAliasMissing)->toBeFalse();
+});
+
+it('does not flag a model that an enforced map does name', function () {
+    $models = (new ModelAnalyzer([], new MorphMap(['order' => 'App\\Models\\Order'], true)))
+        ->analyze(fixture('laravel-project'), ['App\\Models\\Order']);
+
+    expect($models['App\\Models\\Order']->morphAliasMissing)->toBeFalse()
+        ->and($models['App\\Models\\Order']->morphAlias)->toBe('order');
 });

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
-import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery } from '../types/graph'
+import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
 import { FlowchartModal } from './FlowchartModal'
@@ -46,6 +46,8 @@ const TYPE_COLORS: Record<string, string> = {
   abstract_class: '#94a3b8',
   service_provider: '#ca8a04',
   facade:     '#00BCD4',
+  ai_agent:   '#A3E635',
+  ai_tool:    '#65A30D',
   filament_panel:            '#7C3AED',
   filament_resource:         '#A855F7',
   filament_page:             '#C084FC',
@@ -82,6 +84,57 @@ function formatRows(rows: number | null, estimated: boolean): string {
 
   return `${estimated ? '~' : ''}${rows.toLocaleString('en-US')}`
 }
+/**
+ * What each cache kind means, for people who have not internalised which Laravel method does
+ * what. `remember` reading rather than writing is the one that surprises everybody.
+ */
+const CACHE_KIND_HINTS: Record<string, string> = {
+  read:       'Reads a cached value — this data can be stale. `remember` counts as a read: it writes only on a miss.',
+  write:      'Writes a value into the cache.',
+  invalidate: 'Clears cached data. `pull` is here too: it reads the key and removes it.',
+  lock:       'Takes an atomic lock through the cache store.',
+}
+
+
+const AI_ACCENT = '#A3E635'
+
+/**
+ * What the agent's model line should say — which is not always a model id.
+ *
+ * `#[UseSmartestModel]` picks a tier, not a name: the SDK turns it into
+ * `$provider->smartestTextModel()`, whose answer depends on the provider chosen at runtime and
+ * on `config('ai.<lab>.models.text.smartest')`. Printing a guess there would be worse than
+ * printing nothing, so the tier is named as a tier. A `model()` method is the same story unless
+ * its body is a literal.
+ */
+function aiModelSummary(data: Record<string, unknown>): string {
+  const model = typeof data.model === 'string' ? data.model : null
+  if (model) return model
+
+  const source = typeof data.modelSource === 'string' ? data.modelSource : ''
+  const tier = typeof data.modelTier === 'string' ? data.modelTier : ''
+
+  if (source === 'tier') return `${tier} tier — provider decides`
+  if (source === 'method') return 'decided at runtime by model()'
+
+  return "provider's default model"
+}
+
+/** Knob rows worth a line each, in the order a reader asks about them. */
+const AI_KNOBS: { key: string; label: string }[] = [
+  { key: 'provider', label: 'provider' },
+  { key: 'maxSteps', label: 'max steps' },
+  { key: 'maxTokens', label: 'max tokens' },
+  { key: 'temperature', label: 'temperature' },
+  { key: 'topP', label: 'top p' },
+  { key: 'timeout', label: 'timeout' },
+]
+
+const AI_MODES: { key: string; label: string }[] = [
+  { key: 'strict', label: 'strict' },
+  { key: 'repairToolCalls', label: 'repairs tool calls' },
+  { key: 'withoutBroadcasting', label: 'no broadcasting' },
+]
 
 export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
@@ -248,6 +301,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const hasN1 = !!node.data?.hasN1
 
   const dbQueries = (node.data?.dbQueries ?? []) as DbQuery[]
+  const cacheOps = (node.data?.cacheOps ?? []) as CacheOperation[]
   const relationships = (node.data?.relationships ?? []) as Array<{ type: string; related: string }>
   const middlewareParams = (node.type === 'middleware' && typeof node.data?.params === 'string' && node.data.params)
     ? (node.data.params as string).split(',').map(s => s.trim()).filter(Boolean)
@@ -266,6 +320,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'hasN1' &&
       key !== 'classMetrics' &&
       key !== 'dbQueries' &&
+      key !== 'cacheOps' &&
       key !== 'relationships' &&
       key !== 'params' &&
       key !== 'members' &&
@@ -276,6 +331,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'schema' &&
       key !== 'event' &&
       key !== 'listener' &&
+      key !== 'job' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -284,6 +340,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const tableSchema = node.data?.schema as import('../types/graph').TableSchemaData | undefined
   const event = node.data?.event as import('../types/graph').EventNodeData | undefined
   const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
+  const job = node.data?.job as import('../types/graph').JobNodeData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -539,6 +596,115 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                 </div>
               )}
 
+              {node.type === 'ai_agent' && (
+                <div className="sidebar-section">
+                  <h3>Model &amp; limits</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">model</span>
+                    <span className="prop-value" style={{ fontFamily: 'monospace', color: AI_ACCENT }}>
+                      {aiModelSummary(node.data)}
+                    </span>
+                  </div>
+                  {AI_KNOBS.map(({ key, label }) =>
+                    node.data?.[key] === undefined ? null : (
+                      <div key={key} className="prop-row">
+                        <span className="prop-key">{label}</span>
+                        <span className="prop-value" style={{ fontFamily: 'monospace' }}>
+                          {String(node.data[key])}
+                        </span>
+                      </div>
+                    ),
+                  )}
+                  {AI_MODES.map(({ key, label }) =>
+                    node.data?.[key] ? (
+                      <div key={key} className="prop-row">
+                        <span className="prop-key">{label}</span>
+                        <span className="prop-value">yes</span>
+                      </div>
+                    ) : null,
+                  )}
+                  {Array.isArray(node.data?.methodOverrides) && node.data.methodOverrides.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">overridable</span>
+                      <span className="prop-value">{(node.data.methodOverrides as string[]).join(', ')}</span>
+                    </div>
+                  )}
+                  {typeof node.data?.shadowedModelAttribute === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>dead #[Model]</span>
+                      <span className="prop-value">
+                        {node.data.shadowedModelAttribute} — a model() method is read instead
+                      </span>
+                    </div>
+                  )}
+                  {typeof node.data?.shadowedProviderAttribute === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>dead #[Provider]</span>
+                      <span className="prop-value">
+                        {node.data.shadowedProviderAttribute} — a provider() method is read instead
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.contracts) && node.data.contracts.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">contracts</span>
+                      <span className="prop-value">{(node.data.contracts as string[]).join(', ')}</span>
+                    </div>
+                  )}
+                  {node.data?.toolsDecidedAtRuntime === true && (
+                    <div className="prop-row">
+                      <span className="prop-key">tools()</span>
+                      <span className="prop-value">
+                        decided at runtime — this agent has tools Brain cannot name from tools()
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.injectedTools) && node.data.injectedTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">supplied tools</span>
+                      <span className="prop-value">
+                        {(node.data.injectedTools as string[]).length} handed to the constructor where the agent is built
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.unwiredTools) && node.data.unwiredTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key" style={{ color: '#FF6D00' }}>unwired tools</span>
+                      <span className="prop-value">
+                        {(node.data.unwiredTools as string[]).map((t) => t.split('\\').pop()).join(', ')}
+                        {' — tools() is never called without the HasTools contract'}
+                      </span>
+                    </div>
+                  )}
+                  {Array.isArray(node.data?.unresolvedTools) && node.data.unresolvedTools.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">unresolved tools</span>
+                      <span className="prop-value">
+                        {(node.data.unresolvedTools as string[]).join(', ')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {node.type === 'ai_tool' && (
+                <div className="sidebar-section">
+                  <h3>Tool</h3>
+                  <div className="prop-row">
+                    <span className="prop-key">kind</span>
+                    <span className="prop-value">
+                      {node.data?.toolKind === 'mcp' ? 'MCP server tool' : 'laravel/ai tool'}
+                    </span>
+                  </div>
+                  {typeof node.data?.description === 'string' && (
+                    <div className="prop-row">
+                      <span className="prop-key">description</span>
+                      <span className="prop-value">{node.data.description}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {relationships.length > 0 && (
                 <div className="sidebar-section">
                   <h3>Relationships</h3>
@@ -601,6 +767,47 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                         </div>
                       )
                     })}
+                  </div>
+                </div>
+              )}
+
+              {cacheOps.length > 0 && (
+                <div className="sidebar-section sidebar-section--cache">
+                  <h3>Cache</h3>
+                  <div className="cache-list">
+                    {cacheOps.map((op, i) => (
+                      <div key={i} className="cache-item">
+                        <div className="cache-item-head">
+                          <Tooltip content={CACHE_KIND_HINTS[op.kind] ?? op.kind}>
+                            <span className={`cache-kind cache-kind--${op.kind}`}>{op.kind}</span>
+                          </Tooltip>
+                          <span className="cache-method">{op.method}</span>
+                          {op.keyKind === 'computed' ? (
+                            <Tooltip content="The key is built at runtime, so it cannot be read from the source.">
+                              <span className="cache-key cache-key--computed">computed key</span>
+                            </Tooltip>
+                          ) : op.keyKind === 'none' ? (
+                            <span className="cache-key cache-key--computed">whole store</span>
+                          ) : (
+                            <span
+                              className={`cache-key cache-key--${op.keyKind}`}
+                              title={op.key}
+                            >
+                              {op.key}
+                            </span>
+                          )}
+                        </div>
+                        {(op.tags.length > 0 || op.store !== '' || op.ttl !== null) && (
+                          <div className="cache-item-meta">
+                            {op.ttl !== null && <span className="cache-meta">ttl {op.ttl}s</span>}
+                            {op.store !== '' && <span className="cache-meta">store {op.store}</span>}
+                            {op.tags.map((tag, t) => (
+                              <span key={t} className="cache-meta cache-meta--tag">{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -693,11 +900,62 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                 </div>
               )}
 
+              {job && (
+                <div className="sidebar-section">
+                  <h3>Queue behaviour</h3>
+                  {job.tries !== null && (
+                    <div className="prop-row"><span className="prop-key">attempts</span><span className="prop-value">{job.tries}</span></div>
+                  )}
+                  {job.timeout !== null && (
+                    <div className="prop-row"><span className="prop-key">timeout</span><span className="prop-value">{job.timeout}s</span></div>
+                  )}
+                  {job.backoff !== null && (
+                    <div className="prop-row"><span className="prop-key">backoff</span><span className="prop-value">{job.backoff}s</span></div>
+                  )}
+                  {job.maxExceptions !== null && (
+                    <div className="prop-row"><span className="prop-key">max exceptions</span><span className="prop-value">{job.maxExceptions}</span></div>
+                  )}
+                  {job.unique && (
+                    <div className="prop-row">
+                      <span className="prop-key">unique</span>
+                      <span className="prop-value">
+                        {job.uniqueUntilProcessing ? 'until it starts processing' : 'while it is queued or running'}
+                        {job.uniqueFor !== null ? ` \u00b7 ${job.uniqueFor}s` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {job.batchable && (
+                    <div className="prop-row"><span className="prop-key">batch</span><span className="prop-value">runs as part of one</span></div>
+                  )}
+                  {job.afterCommit && (
+                    <div className="prop-row"><span className="prop-key">dispatch</span><span className="prop-value">after the transaction commits</span></div>
+                  )}
+                  {job.encrypted && (
+                    <div className="prop-row"><span className="prop-key">payload</span><span className="prop-value">encrypted</span></div>
+                  )}
+                  {job.middleware.length > 0 && (
+                    <div className="prop-row"><span className="prop-key">middleware</span><span className="prop-value">{job.middleware.join(', ')}</span></div>
+                  )}
+                  {job.dynamic.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">decided at runtime</span>
+                      <span className="prop-value">{job.dynamic.map((d) => `${d}()`).join(', ')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {erd && (
                 <div className="sidebar-section">
                   <h3>Model Schema</h3>
                   <div className="prop-row"><span className="prop-key">table</span><span className="prop-value">{erd.table || '—'}</span></div>
                   <div className="prop-row"><span className="prop-key">primary key</span><span className="prop-value">{erd.primaryKey} ({erd.keyType})</span></div>
+                  {erd.morphAlias && (
+                    <div className="prop-row"><span className="prop-key">morph alias</span><span className="prop-value">{erd.morphAlias}</span></div>
+                  )}
+                  {!erd.morphAlias && erd.morphAliasMissing && (
+                    <div className="prop-row"><span className="prop-key">morph alias</span><span className="prop-value prop-value--warn">none — this app enforces a morph map</span></div>
+                  )}
                   <div className="prop-row"><span className="prop-key">timestamps</span><span className="prop-value">{erd.timestamps ? 'yes' : 'no'}</span></div>
                   <div className="prop-row"><span className="prop-key">soft deletes</span><span className="prop-value">{erd.softDeletes ? 'yes' : 'no'}</span></div>
                   {erd.fillable?.length > 0 && (

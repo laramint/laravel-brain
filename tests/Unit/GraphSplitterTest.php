@@ -200,3 +200,25 @@ it('lays the ERD out in the order the models are given', function () {
 
     expect($ids($ordered))->not->toBe($ids($reversed));
 });
+
+it('puts the morph alias on the ERD node beside the other model facts', function () {
+    // The alias is what a `*_type` column holds, so it is the string somebody arrives with when
+    // they are trying to find out which model a row points at.
+    $def = new ModelDefinition('App\Models\Parcel', '/tmp/Parcel.php', [], [], morphAlias: 'parcel');
+    $tab = (new GraphSplitter)->buildErdTab(['App\Models\Parcel' => $def], 'proj', '2026-01-01T00:00:00Z');
+
+    $erd = $tab['graph']->nodes()[0]->data['erd'];
+
+    expect($erd['morphAlias'])->toBe('parcel')
+        ->and($erd['morphAliasMissing'])->toBeFalse();
+});
+
+it('carries the missing-alias verdict onto the ERD node', function () {
+    $def = new ModelDefinition('App\Models\Parcel', '/tmp/Parcel.php', [], [], morphAliasMissing: true);
+    $tab = (new GraphSplitter)->buildErdTab(['App\Models\Parcel' => $def], 'proj', '2026-01-01T00:00:00Z');
+
+    $erd = $tab['graph']->nodes()[0]->data['erd'];
+
+    expect($erd['morphAlias'])->toBeNull()
+        ->and($erd['morphAliasMissing'])->toBeTrue();
+});

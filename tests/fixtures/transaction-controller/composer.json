@@ -1,0 +1,8 @@
+{
+    "name": "test/transaction-controller",
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}
