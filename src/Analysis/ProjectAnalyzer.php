@@ -109,7 +109,16 @@ class ProjectAnalyzer
 
     private ?int $schemaTimeout = null;
 
-    /** @var string[] class-file search roots, relative to the project root */
+    /**
+     * Class-file search roots, relative to the project root.
+     *
+     * Kept as a property because the reachability pass needs the same directories the rest of
+     * the build resolves classes against — asking a differently-shaped question of a
+     * differently-shaped source tree would report classes as unreached that the graph never
+     * had a chance to reach.
+     *
+     * @var string[]
+     */
     private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
 
     /** Whether this build reports the outgoing HTTP calls each node makes. */

@@ -12,13 +12,13 @@ use LaraMint\LaravelBrain\Analysis\FilamentPageDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentPanelDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
+use LaraMint\LaravelBrain\Analysis\Reachability\ReachabilityReport;
+use LaraMint\LaravelBrain\Analysis\Reachability\UnreachedClass;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
 use LaraMint\LaravelBrain\Analysis\TableSchema;
 use LaraMint\LaravelBrain\Analysis\TableStats;
-use LaraMint\LaravelBrain\Analysis\Reachability\ReachabilityReport;
-use LaraMint\LaravelBrain\Analysis\Reachability\UnreachedClass;
 
 class TabManifestEntry
 {
