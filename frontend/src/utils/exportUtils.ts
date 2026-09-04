@@ -159,9 +159,12 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
         prevId = id
       } else if (step.type === 'loop') {
         const n1Label = step.n1 ? ' ⚠️ N+1 ' : ''
-        lines.push(`  ${id}[/"${n1Label}${escapeLabel(step.label)}"/]`)
+        // `Cache::remember(…, fn)` is re-typed to `loop` so the chart can descend into the
+        // closure; without this it would export as an unlabelled block of work.
+        const cacheLabel = step.cache ? ` [cache ${step.cache.kind}] ` : ''
+        lines.push(`  ${id}[/"${n1Label}${cacheLabel}${escapeLabel(step.label)}"/]`)
         lines.push(`  ${prevId} --> ${id}`)
-        lines.push(`  class ${id} ${step.n1 ? 'cls_n1' : 'cls_loop'}`)
+        lines.push(`  class ${id} ${step.n1 ? 'cls_n1' : step.cache ? 'cls_cache' : 'cls_loop'}`)
         if (step.body && step.body.length > 0) {
           processSteps(step.body, id)
         }
@@ -170,7 +173,10 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
         const [open, close] = [stepShape(step.type), stepShapeClose(step.type)]
         const icon = stepIcon(step.type)
         const n1Label = step.n1 ? ' ⚠️ N+1 ' : ''
-        lines.push(`  ${id}${open}"${n1Label}${icon}${escapeLabel(step.label)}"${close}`)
+        // A returned cache read keeps its `return` type, so the kind has to travel in the label
+        // or the exported chart loses what the panel showed.
+        const cacheLabel = step.cache ? ` [cache ${step.cache.kind}] ` : ''
+        lines.push(`  ${id}${open}"${n1Label}${cacheLabel}${icon}${escapeLabel(step.label)}"${close}`)
         lines.push(`  ${prevId} --> ${id}`)
         lines.push(`  class ${id} ${step.n1 ? 'cls_n1' : `cls_${step.type}`}`)
         prevId = id
@@ -192,6 +198,7 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
   lines.push(`  classDef cls_n1       fill:#b71c1c,stroke:#ff5252,color:#fff`)
   lines.push(`  classDef cls_dispatch fill:#bf360c,stroke:#FF5722,color:#fff`)
   lines.push(`  classDef cls_event    fill:#0e47a1,stroke:#00BCD4,color:#fff`)
+  lines.push(`  classDef cls_cache    fill:#004d40,stroke:#009688,color:#fff`)
 
   return lines.join('\n')
 }
@@ -265,6 +272,7 @@ function stepIcon(type: string): string {
     case 'throw':    return '⚠ '
     case 'dispatch': return '⚡ '
     case 'event':    return '📡 '
+    case 'cache':    return '⛃ '
     default:         return ''
   }
 }

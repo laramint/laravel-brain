@@ -9,6 +9,7 @@ use LaraMint\LaravelBrain\Analysis\AiAgentCallSite;
 use LaraMint\LaravelBrain\Analysis\AiAgentDefinition;
 use LaraMint\LaravelBrain\Analysis\AiToolDefinition;
 use LaraMint\LaravelBrain\Analysis\BladeViewAnalyzer;
+use LaraMint\LaravelBrain\Analysis\CacheOperation;
 use LaraMint\LaravelBrain\Analysis\CallChainEdge;
 use LaraMint\LaravelBrain\Analysis\ChannelDefinition;
 use LaraMint\LaravelBrain\Analysis\ConsoleCommandDefinition;
@@ -23,6 +24,7 @@ use LaraMint\LaravelBrain\Analysis\FilamentRelationManagerDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentResourceDefinition;
 use LaraMint\LaravelBrain\Analysis\FilamentWidgetDefinition;
 use LaraMint\LaravelBrain\Analysis\FlowExtractor;
+use LaraMint\LaravelBrain\Analysis\JobAnalyzer;
 use LaraMint\LaravelBrain\Analysis\MethodTracer;
 use LaraMint\LaravelBrain\Analysis\MiddlewareRegistry;
 use LaraMint\LaravelBrain\Analysis\ModelDefinition;
@@ -51,6 +53,8 @@ class GraphBuilder
     private array $edgeIdOccurrence = [];
 
     private FlowExtractor $flowExtractor;
+
+    private ?JobAnalyzer $jobAnalyzer = null;
 
     private PhpFileParser $parser;
 
@@ -109,6 +113,9 @@ class GraphBuilder
     /** @var string[] class-file search roots, relative to the project root */
     private array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS;
 
+    /** Whether cache operations are detected and attached at all — see setCacheOperationsEnabled(). */
+    private bool $cacheOperationsEnabled = true;
+
     private ?ContainerBindingRegistry $bindingRegistry = null;
 
     private ?FacadeRegistry $facadeRegistry = null;
@@ -160,6 +167,19 @@ class GraphBuilder
     }
 
     /**
+     * Turn cache-operation detection on or off for the whole build.
+     *
+     * Off is off at the source: FlowExtractor drops its detector, so no statement is inspected
+     * for a cache call and the pass below has nothing to walk. It is not a filter over results
+     * that were computed anyway — a project that does not want the feature pays nothing for it.
+     */
+    public function setCacheOperationsEnabled(bool $enabled): void
+    {
+        $this->cacheOperationsEnabled = $enabled;
+        $this->flowExtractor->setCacheOperationsEnabled($enabled);
+    }
+
+    /**
      * The directories searched by file name when the PSR-4 map cannot place a class.
      *
      * @param  string[]  $paths  relative to the project root; glob patterns are expanded
@@ -204,6 +224,14 @@ class GraphBuilder
      * Memoized for the build: the answer depends only on the FQCN, the PSR-4 map and the
      * project root, all fixed once buildGraph() starts.
      */
+    /**
+     * Built on first use: most graphs contain no job at all, and the parser it holds is not free.
+     */
+    private function getJobAnalyzer(): JobAnalyzer
+    {
+        return $this->jobAnalyzer ??= new JobAnalyzer;
+    }
+
     private function resolveFile(string $fqcn): string
     {
         return $this->resolveFileMemo[$fqcn] ??= $this->resolveFileUncached($fqcn);
@@ -602,9 +630,27 @@ class GraphBuilder
             $edgeType = 'action-to-'.$calleeGraphType;
 
             $this->addEdge($callerNode, $calleeNode, $edgeLabel, $edgeType);
+
+            // A transaction is a span, not a step, so it is recorded as something true OF the
+            // work rather than as a node in the path. The callee is what runs inside; the caller
+            // is what opened it and generally outlives it.
+            if ($edge->inTransaction || $edge->inRollback) {
+                $this->recordSpanState($calleeNode, $edge->transactionId, $edge->inTransaction, $edge->inRollback);
+            }
+
             $this->maybeWireContainerBinding($edge, $models);
             $this->maybeWireFacadeResolution($edge, $models);
         }
+
+        foreach (array_keys($this->transactionOpeners) as $key) {
+            [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
+            $nodeId = $this->nodeIdForHop($fqcn, $method);
+            // The opener belongs to the first span it opens, which is the one a reader sees it
+            // wrapped in when the method holds only one — the ordinary case.
+            $this->recordSpanState($nodeId, $key.'#0', inTransaction: true, inRollback: false);
+        }
+
+        $this->stampTransactionScopes();
 
         $this->supplementEnumAndInterfaceNodes($controllers, $callChain);
         $this->wireControllerInterfaceHints($routes, $controllers);
@@ -652,7 +698,73 @@ class GraphBuilder
             }
         }
 
+        // ── 5. Cache-operation pass ───────────────────────────────────────────
+        //
+        // Read back off the flow steps instead of re-walking the ASTs: FlowExtractor has already
+        // resolved the facade alias and the key for every call it charted, and every node with a
+        // method behind it carries flowSteps. One pass here therefore covers the twenty-odd sites
+        // that build such a node, where doing it at creation time would mean twenty-odd copies of
+        // the same three lines — and would silently miss whatever node type is added next.
+        //
+        // Scope is deliberately the node's own body, unlike dbQueries, which follow the call
+        // chain: a cache operation belongs to the method that performs it. Attributing a
+        // service's `Cache::forget()` upwards to every action above it would put the same key on
+        // a dozen panels and lose the one method actually responsible for clearing it — and the
+        // graph edges already lead there.
+        if ($this->cacheOperationsEnabled) {
+            foreach ($this->graph->nodes() as $node) {
+                $steps = $node->data['flowSteps'] ?? null;
+                if (! is_array($steps) || $steps === []) {
+                    continue;
+                }
+
+                $cacheOps = $this->collectCacheOps($steps);
+                if ($cacheOps !== []) {
+                    $this->graph->updateNodeData($node->id, array_merge($node->data, ['cacheOps' => $cacheOps]));
+                }
+            }
+        }
+
         return $this->graph;
+    }
+
+    /**
+     * Every distinct cache operation a flow performs, in the order the source performs them.
+     *
+     * @param  array[]  $steps
+     * @return array[]
+     */
+    private function collectCacheOps(array $steps): array
+    {
+        $found = [];
+        $this->gatherCacheOps($steps, $found);
+
+        return array_values($found);
+    }
+
+    /**
+     * @param  array[]  $steps
+     * @param  array<string, array>  $found  signature => operation, so a key read twice is one row
+     */
+    private function gatherCacheOps(array $steps, array &$found): void
+    {
+        foreach ($steps as $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+
+            if (isset($step['cache']) && is_array($step['cache'])) {
+                $found[CacheOperation::signatureOf($step['cache'])] ??= $step['cache'];
+            }
+
+            // A cache call inside a branch or a callback is still a cache call this method makes;
+            // the N+1 pass walks the same three keys for the same reason.
+            foreach (['then', 'else', 'body'] as $branch) {
+                if (isset($step[$branch]) && is_array($step[$branch])) {
+                    $this->gatherCacheOps($step[$branch], $found);
+                }
+            }
+        }
     }
 
     // ── Node creation helpers ─────────────────────────────────────────────────
@@ -801,12 +913,17 @@ class GraphBuilder
                 $short = class_basename($fqcn);
                 $file = $this->resolveFile($fqcn);
                 $flowSteps = $method ? $this->extractMethodFlowSteps($fqcn, $method) : [];
+                // What the job promises when it goes wrong. The node carried its name, its file
+                // and its flow, so "this runs on a queue" was the whole story — not whether a
+                // failure is retried, nor whether a second dispatch is dropped.
+                $jobFacts = $this->getJobAnalyzer()->describe($fqcn, $file);
                 $this->graph->addNode(new Node($id, 'job', $method ? "{$short}@{$method}" : $short, [
                     'fqcn' => $fqcn,
                     'method' => $method,
                     'file' => $file,
                     'flowSteps' => $flowSteps,
                     'visibility' => 'public',
+                    ...($jobFacts === null ? [] : ['job' => $jobFacts->toArray()]),
                     ...($this->hasN1InSteps($flowSteps) ? ['hasN1' => true] : []),
                 ]));
                 break;
@@ -2189,6 +2306,87 @@ class GraphBuilder
         }
 
         return array_unique($resolved);
+    }
+
+    /**
+     * Methods that open a transaction, keyed `Fqcn::method`, as reported by the tracer.
+     *
+     * @var array<string, true>
+     */
+    private array $transactionOpeners = [];
+
+    /** @param array<string, true> $openers */
+    public function setTransactionOpeners(array $openers): void
+    {
+        $this->transactionOpeners = $openers;
+    }
+
+    /**
+     * Which span each node sits in, and what is true of the node WITHIN that span.
+     *
+     * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
+     * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
+     * which draws one.
+     *
+     * The three facts are kept together on purpose. A node can be reached from more than one
+     * span — a service called both inside a transaction and from a catch block that rolls one
+     * back — and recording them apart let the id come from the first span while the rollback
+     * flag came from any span at all. The node then drew inside region A wearing region B's
+     * marking: shown as a rollback member of a transaction it never rolled back.
+     *
+     * @var array<string, array{id: string|null, inTransaction: bool, inRollback: bool}>
+     */
+    private array $spanStateByNode = [];
+
+    /**
+     * Bind a node to the first span that reached it, flags and identity together.
+     *
+     * First one wins, which is what the identity did before this and is the honest choice while
+     * a node carries one region: a later span cannot be shown, so silently replacing the earlier
+     * one would only change which of two answers is hidden.
+     */
+    private function recordSpanState(string $nodeId, ?string $spanId, bool $inTransaction, bool $inRollback): void
+    {
+        $this->spanStateByNode[$nodeId] ??= [
+            'id' => $spanId,
+            'inTransaction' => $inTransaction,
+            'inRollback' => $inRollback,
+        ];
+    }
+
+    /**
+     * Write the two flags onto the nodes that earned them.
+     *
+     * Done in one pass after the chain is walked rather than as each edge is seen, because a
+     * node can be reached by several calls and the last write would otherwise decide: one call
+     * from inside a transaction is enough to make the flag true, and a later call from outside
+     * must not clear it.
+     */
+    private function stampTransactionScopes(): void
+    {
+        foreach ($this->spanStateByNode as $id => $state) {
+            $node = $this->graph->getNode($id);
+
+            if ($node === null) {
+                continue;
+            }
+
+            $data = $node->data;
+
+            if ($state['inTransaction']) {
+                $data['inTransaction'] = true;
+            }
+
+            if ($state['inRollback']) {
+                $data['inRollback'] = true;
+            }
+
+            if ($state['id'] !== null) {
+                $data['transactionId'] = $state['id'];
+            }
+
+            $this->graph->updateNodeData($id, $data);
+        }
     }
 
     private function addEdge(string $source, string $target, string $label, string $type): void

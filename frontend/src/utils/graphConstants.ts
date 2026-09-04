@@ -1,3 +1,15 @@
+/**
+ * The frame drawn around work that runs inside a database transaction, and around the path that
+ * runs only after one rolled back.
+ *
+ * Deliberately not one of the node-type accents: a transaction is not a kind of thing, it is a
+ * condition several things share, and borrowing a type colour would read as "these became
+ * services". Amber for the span, because it is a caution rather than a fault; a colder red for
+ * the compensation path, which is where a failure has already happened.
+ */
+export const TRANSACTION_FRAME = '#d99a2b'
+export const ROLLBACK_FRAME = '#c2554a'
+
 export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 

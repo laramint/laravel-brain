@@ -110,7 +110,10 @@ export function centerNodes(nodes: LayoutNode[]): void {
 }
 
 export function layoutDagre(nodes: LayoutNode[], edges: LayoutEdge[], rankDir: 'LR' | 'TB'): void {
-  const g = new dagre.graphlib.Graph()
+  // Compound, so that work sharing a transaction can be asked to stay together. Dagre places a
+  // cluster's children as a unit; without that they scatter by call structure and a boundary
+  // drawn around them afterwards inevitably encloses something that was never in the span.
+  const g = new dagre.graphlib.Graph({ compound: true })
   g.setGraph({
     rankdir: rankDir,
     nodesep: rankDir === 'TB' ? 70 : 50,
@@ -122,6 +125,12 @@ export function layoutDagre(nodes: LayoutNode[], edges: LayoutEdge[], rankDir: '
   for (const n of nodes) {
     g.setNode(n.id, { width: n.width, height: n.height })
   }
+
+  for (const [cluster, members] of clusterable(nodes)) {
+    g.setNode(cluster, {})
+    for (const member of members) g.setParent(member.id, cluster)
+  }
+
   for (const e of edges) {
     if (g.hasNode(e.source) && g.hasNode(e.target)) {
       g.setEdge(e.source, e.target)
@@ -135,6 +144,30 @@ export function layoutDagre(nodes: LayoutNode[], edges: LayoutEdge[], rankDir: '
       n.y = nd.y
     }
   }
+}
+
+/**
+ * Groups of nodes that should be laid out together, keyed by a synthetic cluster id.
+ *
+ * Only groups of two or more: a single node is already contiguous with itself, and giving it a
+ * cluster costs dagre a rank without changing anything on screen.
+ */
+function clusterable(nodes: LayoutNode[]): Map<string, LayoutNode[]> {
+  const groups = new Map<string, LayoutNode[]>()
+
+  for (const node of nodes) {
+    const id = (node.data as { transactionId?: unknown } | undefined)?.transactionId
+
+    if (typeof id === 'string' && id !== '') {
+      groups.set(id, [...(groups.get(id) ?? []), node])
+    }
+  }
+
+  for (const [id, members] of groups) {
+    if (members.length < 2) groups.delete(id)
+  }
+
+  return new Map([...groups].map(([id, members]) => [`cluster::${id}`, members]))
 }
 
 /** Layered layout similar to Cytoscape breadthfirst (good for large graphs). */
@@ -204,6 +237,29 @@ export function layoutBreadthFirst(
     const l = level.get(n.id)!
     if (!layers.has(l)) layers.set(l, [])
     layers.get(l)!.push(n.id)
+  }
+
+  // Within a layer, keep work that shares a transaction next to each other. This layout places
+  // by level and would otherwise leave a span's members with unrelated nodes between them, which
+  // is enough for a boundary drawn around them to enclose something that was never in the span.
+  // Only the order inside a layer changes; no node moves between layers, so the hierarchy the
+  // levelling produced is untouched.
+  const spanOf = new Map<string, string>()
+  for (const n of nodes) {
+    const id = (n.data as { transactionId?: unknown } | undefined)?.transactionId
+    if (typeof id === 'string' && id !== '') spanOf.set(n.id, id)
+  }
+
+  if (spanOf.size > 0) {
+    for (const [, ids] of layers) {
+      const order = new Map<string, number>()
+      let next = 0
+      for (const id of ids) {
+        const span = spanOf.get(id) ?? `\u0000${id}`
+        if (!order.has(span)) order.set(span, next++)
+      }
+      ids.sort((a, b) => order.get(spanOf.get(a) ?? `\u0000${a}`)! - order.get(spanOf.get(b) ?? `\u0000${b}`)!)
+    }
   }
   for (const arr of layers.values()) arr.sort()
   const byId = new Map(nodes.map((n) => [n.id, n]))

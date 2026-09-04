@@ -163,6 +163,7 @@ class ProjectAnalyzer
         $this->methodTracer = new MethodTracer(
             is_array($dispatchHelpers) ? $dispatchHelpers : [],
             $sourcePaths,
+            (bool) config('laravel-brain.transactions.enabled', true),
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
         $this->modelAnalyzer = new ModelAnalyzer(is_array($modelPaths) ? $modelPaths : []);
@@ -219,6 +220,9 @@ class ProjectAnalyzer
 
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
+        $this->graphBuilder->setCacheOperationsEnabled(
+            (bool) config('laravel-brain.cache_operations.enabled', true),
+        );
         $livewirePaths = config('laravel-brain.livewire.component_paths', []);
         if (is_array($livewirePaths) && $livewirePaths !== []) {
             $this->graphBuilder->setLivewireComponentPaths($livewirePaths);
@@ -579,6 +583,10 @@ class ProjectAnalyzer
         gc_collect_cycles();
 
         $this->emit('step:start', ['step' => 'graph', 'label' => 'Building graph', 'message' => '  → Building graph...']);
+        // The tracer knows which methods opened a span; the builder knows which nodes those
+        // methods became. Handed over before the build so the flags land with the nodes.
+        $this->graphBuilder->setTransactionOpeners($this->methodTracer->transactionOpeners);
+
         $fullGraph = $this->graphBuilder->build(
             $projectName, $routes, $middlewareRegistry, $controllers, $callChain, $models, $projectRoot, $dbQueryMap, $bindingRegistry, $facadeRegistry, $securityMap,
         );

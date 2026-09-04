@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
-import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery } from '../types/graph'
+import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
 import { FlowchartModal } from './FlowchartModal'
@@ -84,6 +84,17 @@ function formatRows(rows: number | null, estimated: boolean): string {
 
   return `${estimated ? '~' : ''}${rows.toLocaleString('en-US')}`
 }
+/**
+ * What each cache kind means, for people who have not internalised which Laravel method does
+ * what. `remember` reading rather than writing is the one that surprises everybody.
+ */
+const CACHE_KIND_HINTS: Record<string, string> = {
+  read:       'Reads a cached value — this data can be stale. `remember` counts as a read: it writes only on a miss.',
+  write:      'Writes a value into the cache.',
+  invalidate: 'Clears cached data. `pull` is here too: it reads the key and removes it.',
+  lock:       'Takes an atomic lock through the cache store.',
+}
+
 
 const AI_ACCENT = '#A3E635'
 
@@ -290,6 +301,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const hasN1 = !!node.data?.hasN1
 
   const dbQueries = (node.data?.dbQueries ?? []) as DbQuery[]
+  const cacheOps = (node.data?.cacheOps ?? []) as CacheOperation[]
   const relationships = (node.data?.relationships ?? []) as Array<{ type: string; related: string }>
   const middlewareParams = (node.type === 'middleware' && typeof node.data?.params === 'string' && node.data.params)
     ? (node.data.params as string).split(',').map(s => s.trim()).filter(Boolean)
@@ -308,6 +320,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'hasN1' &&
       key !== 'classMetrics' &&
       key !== 'dbQueries' &&
+      key !== 'cacheOps' &&
       key !== 'relationships' &&
       key !== 'params' &&
       key !== 'members' &&
@@ -318,6 +331,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'schema' &&
       key !== 'event' &&
       key !== 'listener' &&
+      key !== 'job' &&
       !(Array.isArray(val) && val.length === 0)
   )
 
@@ -326,6 +340,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
   const tableSchema = node.data?.schema as import('../types/graph').TableSchemaData | undefined
   const event = node.data?.event as import('../types/graph').EventNodeData | undefined
   const listener = node.data?.listener as import('../types/graph').ListenerNodeData | undefined
+  const job = node.data?.job as import('../types/graph').JobNodeData | undefined
 
   const hasFlow = flowSteps.length > 0 || !!sequenceDiagram
   const hasSource = !!filePath
@@ -756,6 +771,47 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                 </div>
               )}
 
+              {cacheOps.length > 0 && (
+                <div className="sidebar-section sidebar-section--cache">
+                  <h3>Cache</h3>
+                  <div className="cache-list">
+                    {cacheOps.map((op, i) => (
+                      <div key={i} className="cache-item">
+                        <div className="cache-item-head">
+                          <Tooltip content={CACHE_KIND_HINTS[op.kind] ?? op.kind}>
+                            <span className={`cache-kind cache-kind--${op.kind}`}>{op.kind}</span>
+                          </Tooltip>
+                          <span className="cache-method">{op.method}</span>
+                          {op.keyKind === 'computed' ? (
+                            <Tooltip content="The key is built at runtime, so it cannot be read from the source.">
+                              <span className="cache-key cache-key--computed">computed key</span>
+                            </Tooltip>
+                          ) : op.keyKind === 'none' ? (
+                            <span className="cache-key cache-key--computed">whole store</span>
+                          ) : (
+                            <span
+                              className={`cache-key cache-key--${op.keyKind}`}
+                              title={op.key}
+                            >
+                              {op.key}
+                            </span>
+                          )}
+                        </div>
+                        {(op.tags.length > 0 || op.store !== '' || op.ttl !== null) && (
+                          <div className="cache-item-meta">
+                            {op.ttl !== null && <span className="cache-meta">ttl {op.ttl}s</span>}
+                            {op.store !== '' && <span className="cache-meta">store {op.store}</span>}
+                            {op.tags.map((tag, t) => (
+                              <span key={t} className="cache-meta cache-meta--tag">{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {structureMembers.length > 0 && (
                 <div className="sidebar-section">
                   <h3>Structure</h3>
@@ -839,6 +895,51 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                       <span className="prop-value">
                         {listener.deferred ? 'yes (queue after_commit)' : 'no'}
                       </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {job && (
+                <div className="sidebar-section">
+                  <h3>Queue behaviour</h3>
+                  {job.tries !== null && (
+                    <div className="prop-row"><span className="prop-key">attempts</span><span className="prop-value">{job.tries}</span></div>
+                  )}
+                  {job.timeout !== null && (
+                    <div className="prop-row"><span className="prop-key">timeout</span><span className="prop-value">{job.timeout}s</span></div>
+                  )}
+                  {job.backoff !== null && (
+                    <div className="prop-row"><span className="prop-key">backoff</span><span className="prop-value">{job.backoff}s</span></div>
+                  )}
+                  {job.maxExceptions !== null && (
+                    <div className="prop-row"><span className="prop-key">max exceptions</span><span className="prop-value">{job.maxExceptions}</span></div>
+                  )}
+                  {job.unique && (
+                    <div className="prop-row">
+                      <span className="prop-key">unique</span>
+                      <span className="prop-value">
+                        {job.uniqueUntilProcessing ? 'until it starts processing' : 'while it is queued or running'}
+                        {job.uniqueFor !== null ? ` \u00b7 ${job.uniqueFor}s` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {job.batchable && (
+                    <div className="prop-row"><span className="prop-key">batch</span><span className="prop-value">runs as part of one</span></div>
+                  )}
+                  {job.afterCommit && (
+                    <div className="prop-row"><span className="prop-key">dispatch</span><span className="prop-value">after the transaction commits</span></div>
+                  )}
+                  {job.encrypted && (
+                    <div className="prop-row"><span className="prop-key">payload</span><span className="prop-value">encrypted</span></div>
+                  )}
+                  {job.middleware.length > 0 && (
+                    <div className="prop-row"><span className="prop-key">middleware</span><span className="prop-value">{job.middleware.join(', ')}</span></div>
+                  )}
+                  {job.dynamic.length > 0 && (
+                    <div className="prop-row">
+                      <span className="prop-key">decided at runtime</span>
+                      <span className="prop-value">{job.dynamic.map((d) => `${d}()`).join(', ')}</span>
                     </div>
                   )}
                 </div>
