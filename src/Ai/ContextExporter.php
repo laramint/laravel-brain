@@ -14,6 +14,7 @@ class ContextExporter
         'route', 'controller', 'action', 'validation_request', 'service',
         'model', 'event', 'job', 'command', 'channel', 'schedule', 'middleware',
         'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
+        'ai_agent', 'ai_tool',
         'filament_panel', 'filament_resource', 'filament_page', 'filament_widget', 'filament_relation_manager',
     ];
 

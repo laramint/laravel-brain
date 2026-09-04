@@ -341,7 +341,7 @@ class ScanCommand extends Command
         if ($verbose) {
             $elapsed = microtime(true) - $totalStart;
             $this->newLine();
-            $this->renderSummary($result->fullGraph->nodeCount(), $result->fullGraph->edgeCount(), $result->totalRoutes, $result->totalCommands, $result->totalChannels, $result->totalFilamentResources, count($result->unresolvedDispatchers), $elapsed);
+            $this->renderSummary($result->fullGraph->nodeCount(), $result->fullGraph->edgeCount(), $result->totalRoutes, $result->totalCommands, $result->totalChannels, $result->totalFilamentResources, count($result->unresolvedDispatchers), $elapsed, $result->isolatedNodes, $result->nodesOutsideTabs);
             $url = rtrim(config('app.url', 'http://localhost'), '/').'/_laravel-brain';
             $this->newLine();
             $this->line("  Open the viewer: <fg=cyan;options=bold>{$url}</>");
@@ -459,7 +459,11 @@ class ScanCommand extends Command
         file_put_contents($flagFile, date('Y-m-d H:i:s'));
     }
 
-    private function renderSummary(int $nodes, int $edges, int $routes, int $commands, int $channels, int $filamentResources, int $unresolvedDispatchers, float $elapsed): void
+    /**
+     * @param  array<string, int>  $isolatedNodes  node type => count, no edge at all
+     * @param  array<string, int>  $nodesOutsideTabs  node type => count, in the graph but in no tab
+     */
+    private function renderSummary(int $nodes, int $edges, int $routes, int $commands, int $channels, int $filamentResources, int $unresolvedDispatchers, float $elapsed, array $isolatedNodes = [], array $nodesOutsideTabs = []): void
     {
         $this->line('  <fg=gray>─────────────────────────────────────────</>');
         $this->line('  <options=bold>Summary</>');
@@ -481,6 +485,19 @@ class ScanCommand extends Command
             $rows[] = ['Unresolved disp.', "<fg=yellow>{$unresolvedDispatchers}</>"];
         }
 
+        // Two different ways for work to end up unseen, reported apart because they have
+        // different causes. "Isolated" is a node no edge touches, which is almost always a pass
+        // that built nodes and forgot to wire them. "Outside tabs" is the stricter question — a
+        // node can be perfectly wired and still sit in a cluster no tab seed reaches, and that is
+        // just as invisible to whoever opens the viewer.
+        if ($isolatedNodes !== []) {
+            $rows[] = ['Isolated nodes', '<fg=yellow>'.array_sum($isolatedNodes).'</> <fg=gray>'.$this->topTypes($isolatedNodes).'</>'];
+        }
+
+        if ($nodesOutsideTabs !== []) {
+            $rows[] = ['Outside tabs', '<fg=yellow>'.array_sum($nodesOutsideTabs).'</> <fg=gray>'.$this->topTypes($nodesOutsideTabs).'</>'];
+        }
+
         $rows[] = ['Total time', '<fg=yellow>'.number_format($elapsed, 2).'s</>'];
 
         foreach ($rows as [$label, $value]) {
@@ -488,5 +505,21 @@ class ScanCommand extends Command
         }
 
         $this->line('  <fg=gray>─────────────────────────────────────────</>');
+    }
+
+    /**
+     * The three biggest contributors to a per-type count, so the number points somewhere.
+     *
+     * @param  array<string, int>  $counts  already ordered highest first
+     */
+    private function topTypes(array $counts): string
+    {
+        $parts = [];
+
+        foreach (array_slice($counts, 0, 3, true) as $type => $count) {
+            $parts[] = "{$type} {$count}";
+        }
+
+        return $parts === [] ? '' : '('.implode(', ', $parts).')';
     }
 }

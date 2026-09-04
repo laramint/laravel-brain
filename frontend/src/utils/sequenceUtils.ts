@@ -5,6 +5,7 @@ import { ACCENT_COLORS } from './graphConstants'
 const TYPE_PRIORITY = [
   'route', 'middleware', 'controller', 'action', 'validation_request', 'service', 'model', 'event', 'job',
   'command', 'channel', 'schedule', 'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
+  'ai_agent', 'ai_tool',
 ]
 
 function normalizeType(type: string): string {
