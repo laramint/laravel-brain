@@ -118,8 +118,16 @@ it('stamps that identity onto the node the builder makes', function () {
     expect($marked)->not->toBeEmpty();
 
     foreach ($marked as $id => $data) {
-        expect($data['transactionId'] ?? null)
-            ->not->toBeNull("node {$id} is marked as running in a transaction but names no span");
+        // Named through the region list rather than a single field: a node can sit in every span
+        // that reached it. The invariant is the one #117 pinned — marked and unable to say which
+        // span is a node the canvas can flag and never draw a box around.
+        $spans = array_filter(
+            $data['regions'] ?? [],
+            fn (array $region): bool => in_array($region['kind'] ?? null, ['transaction', 'rollback'], true),
+        );
+
+        expect($spans)
+            ->not->toBeEmpty("node {$id} is marked as running in a transaction but names no span");
     }
 });
 

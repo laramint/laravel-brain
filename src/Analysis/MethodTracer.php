@@ -86,18 +86,29 @@ class MethodTracer
     private array $sourcePaths;
 
     /**
+     * Whether dispatch sites are read for the chain and batch they dispatch.
+     *
+     * Off, {@see JobGroups} is never asked about a node — the detection does not run and produce
+     * a result nobody draws. The jobs of a `Bus::chain([...])` are still recorded as edges by the
+     * plain dispatch handling, because switching a boundary off is a statement about what the
+     * canvas draws, not about which work exists.
+     */
+    private bool $detectJobGroups;
+
+    /**
      * @param  string[]  $extraDispatchHelpers
      * @param  string[]  $sourcePaths  class-file search roots, relative to the project root
-     */
-    /**
      * @param  bool  $detectTransactions  read transaction spans while scanning; off skips the
      *                                    traversal entirely rather than discarding its result
+     * @param  bool  $detectJobGroups  read chains and batches at their dispatch sites
      */
     public function __construct(
         array $extraDispatchHelpers = [],
         array $sourcePaths = SourceDirectories::DEFAULT_SOURCE_PATHS,
         private readonly bool $detectTransactions = true,
+        bool $detectJobGroups = true,
     ) {
+        $this->detectJobGroups = $detectJobGroups;
         $this->sourcePaths = $sourcePaths;
         $this->parser = new PhpFileParser;
         $this->structureInspector = new PhpStructureInspector($this->parser);
@@ -374,6 +385,18 @@ class MethodTracer
      */
     public array $transactionOpeners = [];
 
+    /**
+     * Every chain and batch found, keyed by the region id the graph will draw it under.
+     *
+     * Keyed rather than appended because a method can be scanned again — a second entry point
+     * reaching the same service — and a chain listed twice would be two regions drawn over one
+     * set of jobs. The id is `Fqcn::method#chain0`, mirroring the `Fqcn::method#0` a transaction
+     * span carries, with the kind in it so a method holding both cannot collide.
+     *
+     * @var array<string, array{id: string, kind: string, jobs: list<string>}>
+     */
+    public array $jobGroups = [];
+
     private function scanMethod(
         Node $ast,
         array $varTypeMap,
@@ -399,10 +422,17 @@ class MethodTracer
 
         $spanKey = $currentFqcn.'::'.($ast instanceof Node\Stmt\ClassMethod ? $ast->name->toString() : '__closure');
 
-        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey) extends NodeVisitorAbstract
+        $visitor = new class($varTypeMap, $useMap, $currentFqcn, $parentFqcn, $this, $dispatchFunctions, $scopes, $spanKey, $this->detectJobGroups) extends NodeVisitorAbstract
         {
             /** @var list<array{fqcn:string,method:string,type:string,visibility:string,inTransaction?:bool,inRollback?:bool,transactionId?:string|null}> */
             public array $hops = [];
+
+            /**
+             * The chains and batches this method dispatched, in the order they were written.
+             *
+             * @var list<array{kind: string, jobs: list<string>}>
+             */
+            public array $jobGroups = [];
 
             private array $varTypeMap;
 
@@ -431,6 +461,7 @@ class MethodTracer
                 array $dispatchFunctions,
                 private TransactionScopes $scopes,
                 private string $spanKey = '',
+                private bool $detectJobGroups = true,
             ) {
                 $this->varTypeMap = $varTypeMap;
                 $this->useMap = $useMap;
@@ -442,6 +473,44 @@ class MethodTracer
             private function markUnresolvedDispatch(): void
             {
                 $this->hops[] = ['fqcn' => '', 'method' => '', 'type' => MethodTracer::UNRESOLVED_DISPATCH, 'visibility' => 'public'];
+            }
+
+            /**
+             * Record a chain or a batch: the jobs it holds, and the group they were dispatched in.
+             *
+             * The head of `dispatch(new A)->chain([new B])` is skipped here on purpose. It is a
+             * dispatch in its own right and the handler for that verb records it a moment later,
+             * so recording it again would give the graph two identical edges to the same job — and
+             * the group still names it, because membership is what the region needs, not the hop.
+             */
+            private function handleJobGroup(JobGroup $group): void
+            {
+                $jobs = [];
+
+                foreach ($group->jobs() as $position => $class) {
+                    $fqcn = $class === '' ? '' : ($this->useMap[$class] ?? $class);
+                    $jobs[] = $fqcn;
+
+                    // The placeholder holds a position in the group; it names no class, so it
+                    // gets no hop and no node.
+                    if ($fqcn === '') {
+                        continue;
+                    }
+
+                    if ($position === 0 && $group->headDispatchesItself) {
+                        continue;
+                    }
+
+                    $this->hops[] = ['fqcn' => $fqcn, 'method' => 'handle', 'type' => 'job', 'visibility' => 'public'];
+                }
+
+                if ($jobs !== []) {
+                    $this->jobGroups[] = ['kind' => $group->kind, 'jobs' => $jobs];
+                }
+
+                if ($group->unresolved) {
+                    $this->markUnresolvedDispatch();
+                }
             }
 
             /**
@@ -463,7 +532,19 @@ class MethodTracer
             {
                 $before = count($this->hops);
 
-                if ($node instanceof Node\Expr\StaticCall) {
+                // Asked before the per-node-type handlers, and instead of them: a chain or a
+                // batch is several dispatches written as one call, so the ordinary Bus branch
+                // below would record the jobs a second time and the graph would carry each of
+                // those edges twice.
+                //
+                // Not asked at all when the feature is off. The question is the whole cost of it
+                // — there is no separate scan to skip later — so the gate belongs here, before
+                // the detector runs, rather than around the result it would have produced.
+                $group = $this->detectJobGroups ? JobGroups::at($node) : null;
+
+                if ($group !== null) {
+                    $this->handleJobGroup($group);
+                } elseif ($node instanceof Node\Expr\StaticCall) {
                     $this->handleStaticCall($node);
                 } elseif ($node instanceof Node\Expr\MethodCall) {
                     $this->handleMethodCall($node);
@@ -547,17 +628,20 @@ class MethodTracer
                     return;
                 }
 
-                // Bus facade: Bus::dispatch(new Job) / Bus::dispatchSync(new Job)
-                // and the array forms Bus::chain([new A, new B]) / Bus::batch([new A, new B]).
+                // The array forms reach here only while chain and batch detection is off: with it
+                // on, enterNode has already handed them to handleJobGroup() and returned. The
+                // jobs are recorded either way — a boundary switched off must not take the work
+                // it drew around off the graph with it — but nothing is remembered about the
+                // group, which is the part that was switched off.
                 if (in_array($class, ['Bus', 'Illuminate\\Support\\Facades\\Bus'], true)
-                    && in_array($method, ['dispatch', 'dispatchSync', 'chain', 'batch'], true)) {
-                    $arg = $node->args[0] ?? null;
-                    $isGroup = in_array($method, ['chain', 'batch'], true);
-                    $jobClasses = $isGroup
-                        ? $this->extractNewClassesFromArray($arg)
-                        : array_filter([$this->extractNewClass($arg)]);
+                    && in_array($method, ['chain', 'batch'], true)) {
+                    ['jobs' => $jobClasses, 'unresolved' => $unresolved] = JobGroups::jobsInArray($node->args[0] ?? null);
 
                     foreach ($jobClasses as $jobClass) {
+                        if ($jobClass === '') {
+                            continue;
+                        }
+
                         $this->hops[] = [
                             'fqcn' => $this->useMap[$jobClass] ?? $jobClass,
                             'method' => 'handle',
@@ -566,7 +650,27 @@ class MethodTracer
                         ];
                     }
 
-                    if ($this->busDispatchIsUnresolved($arg, $isGroup, count($jobClasses))) {
+                    if ($unresolved) {
+                        $this->markUnresolvedDispatch();
+                    }
+
+                    return;
+                }
+
+                // Bus facade: Bus::dispatch(new Job) / Bus::dispatchSync(new Job).
+                if (in_array($class, ['Bus', 'Illuminate\\Support\\Facades\\Bus'], true)
+                    && in_array($method, ['dispatch', 'dispatchSync'], true)) {
+                    $arg = $node->args[0] ?? null;
+                    $jobClass = $this->extractNewClass($arg);
+
+                    if ($jobClass !== null) {
+                        $this->hops[] = [
+                            'fqcn' => $this->useMap[$jobClass] ?? $jobClass,
+                            'method' => 'handle',
+                            'type' => 'job',
+                            'visibility' => 'public',
+                        ];
+                    } elseif ($arg !== null) {
                         $this->markUnresolvedDispatch();
                     }
 
@@ -994,50 +1098,6 @@ class MethodTracer
             }
 
             /**
-             * A Bus dispatch is unresolved when its job argument isn't a literal Brain can read:
-             * a single dispatch whose argument isn't `new Job`, or a chain/batch whose argument
-             * isn't an array literal or contains a non-literal entry. A no-arg call isn't a dispatch.
-             */
-            private function busDispatchIsUnresolved(?Node $arg, bool $isGroup, int $resolvedCount): bool
-            {
-                $value = $arg instanceof Node\Arg ? $arg->value : $arg;
-                if ($value === null) {
-                    return false;
-                }
-                if (! $isGroup) {
-                    return ! $value instanceof Node\Expr\New_;
-                }
-                if (! $value instanceof Node\Expr\Array_) {
-                    return true;
-                }
-
-                return count(array_filter($value->items)) > $resolvedCount;
-            }
-
-            /**
-             * The `new X()` items in an array-literal argument, e.g. Bus::chain([new A, new B]).
-             *
-             * @return string[]
-             */
-            private function extractNewClassesFromArray(?Node $node): array
-            {
-                $value = $node instanceof Node\Arg ? $node->value : $node;
-                if (! $value instanceof Node\Expr\Array_) {
-                    return [];
-                }
-
-                $classes = [];
-                foreach ($value->items as $item) {
-                    $class = $item !== null ? $this->extractNewClass($item->value) : null;
-                    if ($class !== null) {
-                        $classes[] = $class;
-                    }
-                }
-
-                return $classes;
-            }
-
-            /**
              * Qualify an unqualified class name against the namespace of the class
              * currently being scanned. Names that are already qualified, or the
              * self/static/parent keywords (already resolved to an FQCN upstream),
@@ -1119,6 +1179,19 @@ class MethodTracer
 
         $traverser->addVisitor($visitor);
         $traverser->traverse([$ast]);
+
+        // Numbered within the method, the way transaction spans are: two chains in one method are
+        // two regions on screen, and an id that counted across the whole project would renumber
+        // every one of them whenever an unrelated file grew a chain of its own.
+        $seen = [];
+
+        foreach ($visitor->jobGroups as $group) {
+            $ordinal = $seen[$group['kind']] ?? 0;
+            $seen[$group['kind']] = $ordinal + 1;
+            $id = $spanKey.'#'.$group['kind'].$ordinal;
+
+            $this->jobGroups[$id] = ['id' => $id, 'kind' => $group['kind'], 'jobs' => $group['jobs']];
+        }
 
         return $visitor->hops;
     }

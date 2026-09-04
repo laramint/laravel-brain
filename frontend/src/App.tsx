@@ -10,6 +10,7 @@ import { Toolbar } from './components/Toolbar'
 import { LeftSidebar } from './components/LeftSidebar'
 import type { GraphNode, TabEntry } from './types/graph'
 import { Tooltip } from './components/Tooltip'
+import { membershipsOf } from './utils/graphRegions'
 import './App.css'
 
 const ALL_TYPES: GraphNode['type'][] = [
@@ -21,13 +22,16 @@ const ALL_TYPES: GraphNode['type'][] = [
 ]
 
 /**
- * Everything the footer can switch off, including the one entry that is not a node type.
+ * Everything the footer can switch off, including the entries that are not node types.
  *
- * `transaction` is the boundary drawn around work that shares one; it belongs in the default set
- * so the region is visible without being asked for, and in the same set so it can be switched off
- * from the same place as everything else.
+ * The three region kinds are boundaries drawn around nodes that share something — a transaction,
+ * a chain, a batch. They belong in the default set so a region is visible without being asked
+ * for, and in the same set so they can be switched off from the same place as everything else.
+ * `rollback` is not among them: it is the other half of a transaction's span and is switched with
+ * it, because a compensation path shown while the transaction it compensates is hidden is a
+ * region with nothing to be the compensation for.
  */
-const ALL_TOGGLEABLE: string[] = [...ALL_TYPES, 'transaction']
+const ALL_TOGGLEABLE: string[] = [...ALL_TYPES, 'transaction', 'chain', 'batch']
 
 // Node types that should have their methods expanded on first click
 
@@ -145,16 +149,21 @@ export default function App() {
       return acc
     }, {})
 
-    // Transactions are not a kind of node, so they are counted by how many DISTINCT spans the
-    // canvas holds rather than by how many nodes sit in one. Listed alongside the node types
-    // because from the reader's side it is the same question — is this on the graph or not.
-    const spans = new Set(
-      tabState.data.nodes
-        .map((n) => (n.data as { transactionId?: unknown } | undefined)?.transactionId)
-        .filter((id): id is string => typeof id === 'string' && id !== '')
-    )
+    // Regions are not a kind of node, so they are counted by how many DISTINCT ones the canvas
+    // holds rather than by how many nodes sit in one. Listed alongside the node types because
+    // from the reader's side it is the same question — is this on the graph or not.
+    const seen: Record<string, Set<string>> = {}
 
-    if (spans.size > 0) counts.transaction = spans.size
+    for (const node of tabState.data.nodes) {
+      for (const membership of membershipsOf(node)) {
+        // Counted under the toggle that switches it, so the number the footer shows is the
+        // number of regions that row turns off — a rollback is part of its transaction's span.
+        const key = membership.kind === 'rollback' ? 'transaction' : membership.kind
+        seen[key] = (seen[key] ?? new Set()).add(membership.id)
+      }
+    }
+
+    for (const [kind, ids] of Object.entries(seen)) counts[kind] = ids.size
 
     return counts
   }, [tabState.data])

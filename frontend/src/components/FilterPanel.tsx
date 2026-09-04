@@ -1,5 +1,5 @@
 import type { GraphNode } from '../types/graph'
-import { ACCENT_COLORS, TRANSACTION_FRAME } from '../utils/graphConstants'
+import { ACCENT_COLORS, REGION_FRAME } from '../utils/graphConstants'
 import { Tooltip } from './Tooltip'
 
 const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
@@ -47,14 +47,20 @@ const ORDER: GraphNode['type'][] = [
 ]
 
 /**
- * Listed last, and not a node type.
+ * Listed last, and not node types.
  *
- * A transaction is a region drawn around nodes rather than a node, so it has no entry in
- * `GraphNode['type']` and its count is a number of spans, not of nodes. It belongs in this list
- * anyway: from the reader's side the question is the same one every other row answers — is this
- * drawn on the graph, and can I turn it off.
+ * A region is a boundary drawn around nodes rather than a node, so it has no entry in
+ * `GraphNode['type']` and its count is a number of regions, not of nodes. They belong in this
+ * list anyway: from the reader's side the question is the same one every other row answers — is
+ * this drawn on the graph, and can I turn it off.
+ *
+ * `rollback` has no row: it is the other half of a transaction's span and is switched with it.
  */
-const REGION_TYPE = 'transaction'
+const REGION_TYPES: { type: string; label: string; description: string }[] = [
+  { type: 'transaction', label: 'Transactions', description: 'the boundary drawn around work that runs in one transaction' },
+  { type: 'chain', label: 'Chains', description: 'the boundary and the arrows drawn around jobs that run one after another' },
+  { type: 'batch', label: 'Batches', description: 'the boundary drawn around jobs dispatched together, in no particular order' },
+]
 
 interface Props {
   visibleTypes: Set<string>
@@ -66,8 +72,11 @@ interface Props {
 
 export function FilterPanel({ visibleTypes, counts, onToggle, onShowAll, onHideAll }: Props) {
   const present: string[] = ORDER.filter((t) => (counts[t] ?? 0) > 0)
+  const regions = new Map(REGION_TYPES.map((region) => [region.type, region]))
 
-  if ((counts[REGION_TYPE] ?? 0) > 0) present.push(REGION_TYPE)
+  for (const region of REGION_TYPES) {
+    if ((counts[region.type] ?? 0) > 0) present.push(region.type)
+  }
 
   return (
     <div className="show-graph">
@@ -83,15 +92,14 @@ export function FilterPanel({ visibleTypes, counts, onToggle, onShowAll, onHideA
         {present.map((type) => {
           const count = counts[type] ?? 0
           const checked = visibleTypes.has(type)
-          const color = type === REGION_TYPE
-            ? TRANSACTION_FRAME
+          const region = regions.get(type)
+          const color = region
+            ? REGION_FRAME[type] ?? '#94a3b8'
             : ACCENT_COLORS[type] ?? '#94a3b8'
-          const label = type === REGION_TYPE
-            ? 'Transactions'
-            : TYPE_LABELS[type as GraphNode['type']] ?? type
+          const label = region?.label ?? TYPE_LABELS[type as GraphNode['type']] ?? type
           return (
-            <Tooltip key={type} content={type === REGION_TYPE
-              ? `${checked ? 'Hide' : 'Show'} the boundary drawn around work that runs in one transaction`
+            <Tooltip key={type} content={region
+              ? `${checked ? 'Hide' : 'Show'} ${region.description}`
               : `${checked ? 'Hide' : 'Show'} ${label} nodes`}>
               <button
                 type="button"

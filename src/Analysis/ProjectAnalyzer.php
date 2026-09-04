@@ -163,7 +163,8 @@ class ProjectAnalyzer
         $this->methodTracer = new MethodTracer(
             is_array($dispatchHelpers) ? $dispatchHelpers : [],
             $sourcePaths,
-            (bool) config('laravel-brain.transactions.enabled', true),
+            detectTransactions: (bool) config('laravel-brain.transactions.enabled', true),
+            detectJobGroups: (bool) config('laravel-brain.job_groups.enabled', true),
         );
         $modelPaths = config('laravel-brain.models.paths', ['app/Models']);
         $this->modelAnalyzer = new ModelAnalyzer(
@@ -589,6 +590,7 @@ class ProjectAnalyzer
         // The tracer knows which methods opened a span; the builder knows which nodes those
         // methods became. Handed over before the build so the flags land with the nodes.
         $this->graphBuilder->setTransactionOpeners($this->methodTracer->transactionOpeners);
+        $this->graphBuilder->setJobGroups(array_values($this->methodTracer->jobGroups));
 
         $fullGraph = $this->graphBuilder->build(
             $projectName, $routes, $middlewareRegistry, $controllers, $callChain, $models, $projectRoot, $dbQueryMap, $bindingRegistry, $facadeRegistry, $securityMap,
@@ -628,6 +630,11 @@ class ProjectAnalyzer
         $viewComposition = $this->bladeViewAnalyzer->analyze($projectRoot);
         $this->graphBuilder->addViewComposition($viewComposition);
         $this->emit('step:done', ['step' => 'views', 'count' => count($viewComposition), 'unit' => 'composed view', 'message' => '    Mapped '.count($viewComposition).' composing view(s)']);
+
+        // Last, because a chain can be dispatched from anywhere: a controller, a console command,
+        // a Filament page. Each of those passes creates its own job nodes, and a stamp written
+        // before the pass that creates them would have nothing to write on.
+        $this->graphBuilder->stampJobGroupRegions();
 
         // A scoped run has built only the changed files' share of the graph; the rest of it comes
         // from the previous full run, with those files' nodes substituted in place.

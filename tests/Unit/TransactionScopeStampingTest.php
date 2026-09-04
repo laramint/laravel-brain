@@ -35,10 +35,24 @@ function edgeInSpan(string $caller, string $span, bool $rollback): CallChainEdge
     );
 }
 
+/**
+ * The kind this node carries for a given span, or null when it is not in that span at all.
+ */
+function regionKind(Node $node, string $spanId): ?string
+{
+    foreach ($node->data['regions'] ?? [] as $region) {
+        if (($region['id'] ?? null) === $spanId) {
+            return $region['kind'] ?? null;
+        }
+    }
+
+    return null;
+}
+
 it('marks a node with the span it was reached from', function () {
     $node = stampedNode([edgeInSpan('App\\A', 'App\\A::handle#0', rollback: false)], 'App\\Services\\Ledger');
 
-    expect($node->data['transactionId'])->toBe('App\\A::handle#0')
+    expect(regionKind($node, 'App\\A::handle#0'))->toBe('transaction')
         ->and($node->data['inTransaction'] ?? false)->toBeTrue();
 });
 
@@ -47,22 +61,29 @@ it('does not dress a node in a rollback flag belonging to another span', functio
     // were set by any edge at all. A service called inside one transaction and again from a
     // catch block that rolls back a different one then carried the first span's id and the
     // second span's rollback marking — drawn inside a region it never rolled back.
+    //
+    // A node reached from two spans is now in BOTH, each wearing its own kind, which is what
+    // makes the mispairing structurally impossible rather than merely fixed: there is no single
+    // field left for one span's identity to share with another span's marking.
     $node = stampedNode([
         edgeInSpan('App\\A', 'App\\A::handle#0', rollback: false),
         edgeInSpan('App\\B', 'App\\B::handle#0', rollback: true),
     ], 'App\\Services\\Ledger');
 
-    expect($node->data['transactionId'])->toBe('App\\A::handle#0')
-        ->and($node->data['inRollback'] ?? false)->toBeFalse();
+    expect(regionKind($node, 'App\\A::handle#0'))->toBe('transaction')
+        ->and(regionKind($node, 'App\\B::handle#0'))->toBe('rollback');
 });
 
-it('keeps the flags of the span it did bind to, whichever came first', function () {
-    // The mirror case, so the rule cannot be satisfied by never reporting a rollback at all.
+it('reads the same whichever span reached the node first', function () {
+    // The mirror case, so the rule cannot be satisfied by never reporting a rollback at all —
+    // and, because the queue this models is not ordered, by asserting the result converges
+    // rather than that one particular arrival wins.
     $node = stampedNode([
         edgeInSpan('App\\B', 'App\\B::handle#0', rollback: true),
         edgeInSpan('App\\A', 'App\\A::handle#0', rollback: false),
     ], 'App\\Services\\Ledger');
 
-    expect($node->data['transactionId'])->toBe('App\\B::handle#0')
+    expect(regionKind($node, 'App\\A::handle#0'))->toBe('transaction')
+        ->and(regionKind($node, 'App\\B::handle#0'))->toBe('rollback')
         ->and($node->data['inRollback'] ?? false)->toBeTrue();
 });

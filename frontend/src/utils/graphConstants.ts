@@ -10,6 +10,47 @@
 export const TRANSACTION_FRAME = '#d99a2b'
 export const ROLLBACK_FRAME = '#c2554a'
 
+/**
+ * The frames drawn around jobs dispatched together — a chain, and a batch.
+ *
+ * Muted on purpose, like the two above and for the same reason: a region is a condition its
+ * members share, not a type they became, and a saturated frame around a job card competes with
+ * the card. Steel for the chain, which runs in order; a colder violet for the batch, which does
+ * not. Neither is the job accent (#607D8B), so a boundary is never mistaken for a node's own edge.
+ */
+export const CHAIN_FRAME = '#5f8fa8'
+export const BATCH_FRAME = '#8a7fb5'
+
+/** Frame colour by region kind — the one place a new kind has to be given a colour. */
+export const REGION_FRAME: Record<string, string> = {
+  transaction: TRANSACTION_FRAME,
+  rollback: ROLLBACK_FRAME,
+  chain: CHAIN_FRAME,
+  batch: BATCH_FRAME,
+}
+
+/**
+ * The dash each kind's boundary is drawn with.
+ *
+ * A second channel beside colour, because the frames are thin and dashed and a reader with a
+ * colour deficiency would otherwise have only the name to go on. Short dashes for the rollback,
+ * which is the anxious one; a long dash for the chain, which reads as a run of links.
+ */
+export const REGION_DASH: Record<string, string> = {
+  transaction: '6 5',
+  rollback: '2 4',
+  chain: '10 4',
+  batch: '4 4',
+}
+
+/**
+ * Vertical step between two region labels that share an anchor.
+ *
+ * A node in two regions — a chained job dispatched inside a transaction — has both names
+ * written to the same corner of it. Stacking them by a line is what keeps either readable.
+ */
+export const REGION_LABEL_LINE = 11
+
 export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 

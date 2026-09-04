@@ -225,6 +225,34 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Job Chains & Batches
+    // -------------------------------------------------------------------------
+    // Whether dispatch sites are read for the group they dispatch — Bus::chain,
+    // Bus::batch, Job::withChain, dispatch(...)->chain(...) — so the canvas can
+    // draw a boundary around jobs that go out together, with arrows through a
+    // chain in the order it runs.
+    //
+    // What it costs: every static and instance call in every traced method is
+    // asked whether it is one of those five forms. That is a handful of instanceof
+    // checks per call node, and on top of it each group found is carried through
+    // the build and stamped onto its jobs.
+    //
+    // Why you might turn it off: an application that dispatches nothing in a chain
+    // or a batch pays the question and never gets an answer, and one that dispatches
+    // hundreds may prefer a canvas without the extra boundaries on it. Turning it
+    // off does not hide the jobs — the members of a Bus::chain([...]) are still
+    // traced as edges — only the group they were dispatched in.
+    //
+    // Database transactions are drawn as their own kind of region and have their own
+    // switch on the canvas; this setting does not affect them.
+    //
+    // Override via the LARAVEL_BRAIN_JOB_GROUPS_ENABLED env variable.
+    //
+    'job_groups' => [
+        'enabled' => env('LARAVEL_BRAIN_JOB_GROUPS_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // Event Listeners
     // -------------------------------------------------------------------------
     // Event → listener edges are discovered from every registration form:

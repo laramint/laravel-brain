@@ -634,8 +634,26 @@ class GraphBuilder
             // A transaction is a span, not a step, so it is recorded as something true OF the
             // work rather than as a node in the path. The callee is what runs inside; the caller
             // is what opened it and generally outlives it.
-            if ($edge->inTransaction || $edge->inRollback) {
-                $this->recordSpanState($calleeNode, $edge->transactionId, $edge->inTransaction, $edge->inRollback);
+            if ($edge->inTransaction) {
+                $this->inTransactionNodes[$calleeNode] = true;
+            }
+            if ($edge->inRollback) {
+                $this->inRollbackNodes[$calleeNode] = true;
+            }
+            if ($edge->transactionId !== null) {
+                // Every span the node was reached from, not just the first. A job dispatched from
+                // two methods sits in two spans, and keeping only one of them used to pair the id
+                // of one method's transaction with the rollback flag another method had set — a
+                // region named after a transaction that never held the compensation drawn in it.
+                if ($edge->inRollback) {
+                    // A call on the compensation path is marked as being inside the span it
+                    // compensates as well — the whole try/catch sits within the range a manual
+                    // `beginTransaction()` opened. Rollback is the more specific of the two, and
+                    // the one worth drawing: it is where a write survives a failure.
+                    $this->transactionIdByNode[$calleeNode][$edge->transactionId] = 'rollback';
+                } else {
+                    $this->transactionIdByNode[$calleeNode][$edge->transactionId] ??= 'transaction';
+                }
             }
 
             $this->maybeWireContainerBinding($edge, $models);
@@ -645,9 +663,10 @@ class GraphBuilder
         foreach (array_keys($this->transactionOpeners) as $key) {
             [$fqcn, $method] = array_pad(explode('::', (string) $key, 2), 2, '');
             $nodeId = $this->nodeIdForHop($fqcn, $method);
+            $this->inTransactionNodes[$nodeId] = true;
             // The opener belongs to the first span it opens, which is the one a reader sees it
             // wrapped in when the method holds only one — the ordinary case.
-            $this->recordSpanState($nodeId, $key.'#0', inTransaction: true, inRollback: false);
+            $this->transactionIdByNode[$nodeId][$key.'#0'] ??= 'transaction';
         }
 
         $this->stampTransactionScopes();
@@ -2330,36 +2349,104 @@ class GraphBuilder
     }
 
     /**
-     * Which span each node sits in, and what is true of the node WITHIN that span.
+     * Node ids that run inside a transaction, and those on a rollback path.
+     *
+     * @var array<string, true>
+     */
+    private array $inTransactionNodes = [];
+
+    /** @var array<string, true> */
+    private array $inRollbackNodes = [];
+
+    /**
+     * Which spans each node sits in, as `Fqcn::method#n` => the kind of span it is.
      *
      * The identity is what makes a region drawable: a boolean says "this ran in a transaction",
      * which for eight nodes draws eight boxes. Sharing an id says "these ran in the SAME one",
      * which draws one.
      *
-     * The three facts are kept together on purpose. A node can be reached from more than one
-     * span — a service called both inside a transaction and from a catch block that rolls one
-     * back — and recording them apart let the id come from the first span while the rollback
-     * flag came from any span at all. The node then drew inside region A wearing region B's
-     * marking: shown as a rollback member of a transaction it never rolled back.
-     *
-     * @var array<string, array{id: string|null, inTransaction: bool, inRollback: bool}>
+     * @var array<string, array<string, string>>
      */
-    private array $spanStateByNode = [];
+    private array $transactionIdByNode = [];
 
     /**
-     * Bind a node to the first span that reached it, flags and identity together.
+     * Chains and batches found at dispatch sites, keyed by region id, as the tracer read them.
      *
-     * First one wins, which is what the identity did before this and is the honest choice while
-     * a node carries one region: a later span cannot be shown, so silently replacing the earlier
-     * one would only change which of two answers is hidden.
+     * @var list<array{id: string, kind: string, jobs: list<string>}>
      */
-    private function recordSpanState(string $nodeId, ?string $spanId, bool $inTransaction, bool $inRollback): void
+    private array $jobGroups = [];
+
+    /** @param list<array{id: string, kind: string, jobs: list<string>}> $groups */
+    public function setJobGroups(array $groups): void
     {
-        $this->spanStateByNode[$nodeId] ??= [
-            'id' => $spanId,
-            'inTransaction' => $inTransaction,
-            'inRollback' => $inRollback,
-        ];
+        $this->jobGroups = $groups;
+    }
+
+    /**
+     * Write one region membership onto a node.
+     *
+     * Membership is a list rather than a field because the three kinds overlap in practice: a
+     * `Bus::batch([...])` written inside `DB::transaction(...)` puts every one of those jobs in
+     * two regions at once, and a node that could only remember the last one would drop whichever
+     * pass ran second — silently, and differently depending on the order the passes happen to run.
+     *
+     * `position` is the job's place in the sequence, and only a chain has one. A batch and a
+     * transaction are sets: numbering their members would invent an order the code never stated.
+     */
+    private function addNodeRegion(string $nodeId, string $regionId, string $kind, ?int $position = null): void
+    {
+        $node = $this->graph->getNode($nodeId);
+
+        if ($node === null) {
+            return;
+        }
+
+        $regions = $node->data['regions'] ?? [];
+
+        if (! is_array($regions)) {
+            $regions = [];
+        }
+
+        foreach ($regions as $region) {
+            if (is_array($region) && ($region['id'] ?? null) === $regionId) {
+                return;
+            }
+        }
+
+        $regions[] = ['id' => $regionId, 'kind' => $kind, 'position' => $position];
+
+        $this->graph->updateNodeData($nodeId, [...$node->data, 'regions' => array_values($regions)]);
+    }
+
+    /**
+     * Put every job of a chain or a batch in its region, in the order it was dispatched.
+     *
+     * Run after every pass that can add a job node, not at the end of `build()`: a chain
+     * dispatched from a console command's `handle()` is traced during the build but its job nodes
+     * are only created by `addConsoleCommands()` afterwards, and a stamp written before them would
+     * find nothing to write on and say nothing about it.
+     *
+     * A member the graph does not hold is skipped rather than created. Its place in the sequence
+     * is still counted, so the jobs that ARE on the canvas keep the order they run in — reading
+     * 1, 3, 4 says something true about a chain whose second job is filtered out of this tab,
+     * where renumbering them 1, 2, 3 would say the second job runs after the first and it does not.
+     */
+    public function stampJobGroupRegions(): void
+    {
+        foreach ($this->jobGroups as $group) {
+            foreach ($group['jobs'] as $position => $fqcn) {
+                if ($fqcn === '') {
+                    continue;
+                }
+
+                $this->addNodeRegion(
+                    $this->nodeIdForHop($fqcn, 'handle'),
+                    $group['id'],
+                    $group['kind'],
+                    $group['kind'] === 'chain' ? $position : null,
+                );
+            }
+        }
     }
 
     /**
@@ -2372,28 +2459,24 @@ class GraphBuilder
      */
     private function stampTransactionScopes(): void
     {
-        foreach ($this->spanStateByNode as $id => $state) {
-            $node = $this->graph->getNode($id);
+        foreach ([$this->inTransactionNodes, $this->inRollbackNodes] as $index => $ids) {
+            $key = $index === 0 ? 'inTransaction' : 'inRollback';
 
-            if ($node === null) {
-                continue;
+            foreach (array_keys($ids) as $id) {
+                $node = $this->graph->getNode($id);
+
+                if ($node === null) {
+                    continue;
+                }
+
+                $this->graph->updateNodeData($id, [...$node->data, $key => true]);
+
+                // The compensation path is a region of its own kind, not a transaction that
+                // happens to be drawn differently: it runs with the transaction already gone.
+                foreach ($this->transactionIdByNode[$id] ?? [] as $spanId => $kind) {
+                    $this->addNodeRegion($id, $spanId, $kind);
+                }
             }
-
-            $data = $node->data;
-
-            if ($state['inTransaction']) {
-                $data['inTransaction'] = true;
-            }
-
-            if ($state['inRollback']) {
-                $data['inRollback'] = true;
-            }
-
-            if ($state['id'] !== null) {
-                $data['transactionId'] = $state['id'];
-            }
-
-            $this->graph->updateNodeData($id, $data);
         }
     }
 
