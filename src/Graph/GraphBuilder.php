@@ -35,6 +35,8 @@ use LaraMint\LaravelBrain\Analysis\RelationAutoloading;
 use LaraMint\LaravelBrain\Analysis\RouteDefinition;
 use LaraMint\LaravelBrain\Analysis\ScheduleEntry;
 use LaraMint\LaravelBrain\Analysis\SchemaIssueBuilder;
+use LaraMint\LaravelBrain\Analysis\ServiceProviderRecord;
+use LaraMint\LaravelBrain\Analysis\ServiceProviderRegistry;
 use LaraMint\LaravelBrain\Analysis\SourceDirectories;
 use LaraMint\LaravelBrain\Analysis\TableSchema;
 use LaraMint\LaravelBrain\Analysis\TableStats;
@@ -2471,6 +2473,127 @@ class GraphBuilder
             $this->addPolicyNode($policyFqcn, $policyId);
             $this->addEdge($modelId, $policyId, 'authorized by', 'model-to-policy');
         }
+    }
+
+    // ── Deferred service providers ────────────────────────────────────────────
+
+    /**
+     * Mark deferred providers and wire what would boot them.
+     *
+     * The static half of Laravel's deferred machinery is fully knowable: `isDeferred()` is a
+     * plain `instanceof DeferrableProvider`, and `ProviderRepository::compileManifest()` turns
+     * each string from `provides()` into a manifest key that
+     * `Application::loadDeferredProviderIfNeeded()` matches on the way into `make()`. So "which
+     * providers are deferred", "what does each one claim to provide", and therefore "resolving
+     * this would register that provider" all fall out of the source.
+     *
+     * What does NOT fall out of the source is whether a given request resolves any of those keys.
+     * That is a runtime fact about one execution, and no static pass produces it. The edges below
+     * are the causal statement — resolve this, and this provider loads — not a claim that it
+     * happened.
+     */
+    public function addServiceProviders(ServiceProviderRegistry $registry): void
+    {
+        // Built before any provider node is created, so a provider can never be mistaken for one
+        // of the services it provides.
+        $nodesByFqcn = [];
+        foreach ($this->graph->nodes() as $node) {
+            $fqcn = $node->data['fqcn'] ?? null;
+            if (is_string($fqcn) && $fqcn !== '') {
+                $nodesByFqcn[$fqcn][] = $node->id;
+            }
+        }
+
+        foreach ($registry->all() as $record) {
+            // Eager providers with nothing to report already appear in the graph wherever a
+            // binding was wired to them; adding the rest would only scatter isolated nodes.
+            if (! $record->deferred && ! $record->legacyDeferIgnored()) {
+                continue;
+            }
+
+            $providerId = $this->ensureServiceProviderNode($record->fqcn);
+            $this->annotateDeferredProvider($providerId, $record);
+
+            if (! $record->deferred) {
+                continue;
+            }
+
+            foreach ($record->provides as $service) {
+                foreach ($nodesByFqcn[$service] ?? [] as $serviceNodeId) {
+                    $this->addEdge(
+                        $serviceNodeId,
+                        $providerId,
+                        'resolving boots '.class_basename($record->fqcn),
+                        'boots-deferred-provider',
+                    );
+                }
+            }
+        }
+    }
+
+    private function annotateDeferredProvider(string $providerId, ServiceProviderRecord $record): void
+    {
+        $node = $this->graph->getNode($providerId);
+        if ($node === null) {
+            return;
+        }
+
+        $data = $node->data;
+        if (($data['file'] ?? '') === '') {
+            $data['file'] = $record->file;
+        }
+        $data['deferred'] = $record->deferred;
+        if ($record->provides !== []) {
+            $data['provides'] = $record->provides;
+        }
+        if ($record->providesIsDynamic) {
+            $data['providesIsDynamic'] = true;
+        }
+        if ($record->when !== []) {
+            $data['bootsOnEvent'] = $record->when;
+        }
+
+        $defect = $this->deferredProviderDefect($record);
+        if ($defect !== null) {
+            $data['deferredDefect'] = $defect['type'];
+            $data['deferredDefectMessage'] = $defect['message'];
+        }
+
+        $this->graph->updateNodeData($providerId, $data);
+    }
+
+    /**
+     * @return array{type: string, message: string}|null
+     */
+    private function deferredProviderDefect(ServiceProviderRecord $record): ?array
+    {
+        if ($record->neverBoots()) {
+            return [
+                'type' => 'never-boots',
+                'message' => 'Deferred, but provides() returns nothing — no container key maps to '
+                    .'this provider, so register() and boot() never run.',
+            ];
+        }
+
+        $unbacked = $record->unbackedProvides();
+        if ($unbacked !== []) {
+            return [
+                'type' => 'unbacked-provides',
+                'message' => 'provides() promises '.implode(', ', array_map('class_basename', $unbacked))
+                    .', which this provider is not seen to register — resolving it boots the '
+                    .'provider and still fails.',
+            ];
+        }
+
+        if ($record->legacyDeferIgnored()) {
+            return [
+                'type' => 'legacy-defer',
+                'message' => '$defer = true has not been read since Laravel 5.8 — without '
+                    .'DeferrableProvider this provider is registered eagerly on every request.',
+            ];
+        }
+
+        return null;
     }
 
     private function addPolicyNode(string $fqcn, string $id): void

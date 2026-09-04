@@ -363,6 +363,31 @@ Both directories default to the standard skeleton and take glob patterns, so an 
 ],
 ```
 
+### Deferred providers
+
+The same scan reads what each provider says about its own loading. A provider is deferred when it implements `Illuminate\Contracts\Support\DeferrableProvider` — that is the whole of Laravel's `ServiceProvider::isDeferred()`, and the pre-5.8 `protected $defer = true;` property has not been read by the framework since. Deferred providers are marked as such in the graph, along with the service keys their `provides()` returns and any events their `when()` names.
+
+Because Laravel keys its deferred manifest by exactly those strings, "resolving this service loads that provider" is a fact about the source, and the graph draws it: a `boots-deferred-provider` edge runs from each provided service to the provider its resolution would register. Whether a given request actually resolves any of them is a runtime fact, and nothing here claims it.
+
+Three shapes are flagged, because each one fails without an error anywhere:
+
+- **Never boots** — a deferred provider whose `provides()` is empty, usually one that implements the interface without overriding the method. Nothing maps to it, so `register()` and `boot()` never run. Not flagged when `when()` can still register it.
+- **Unbacked `provides()`** — a promised key the provider is not seen to register, classically the implementation listed where the contract is bound. Resolving it boots the provider and still fails.
+- **`$defer` ignored** — the legacy property without the interface. The provider is registered eagerly on every request while its author believes it is deferred.
+
+A provider whose `provides()` is computed rather than written out is reported as such and never flagged: a declaration we could only half read is not evidence of a defect.
+
+The whole read is a switch, on by default. It costs a second walk over `container_bindings.provider_paths`; parse results are shared across the build, so nothing is re-read from disk. Off means the walk does not happen — not that its result is discarded:
+
+```php
+// config/laravel-brain.php
+'service_providers' => [
+    'enabled' => false,
+],
+```
+
+Or `LARAVEL_BRAIN_SERVICE_PROVIDERS_ENABLED=false` in the environment.
+
 ### Filament PHP support
 
 When Filament is installed, the scanner discovers every panel registered via service providers, then resolves its resources, pages, widgets, and relation managers — both explicitly listed (`->resources([...])`) and auto-discovered (`->discoverResources(for: '...')`). Filament page methods are traced through the same call-chain engine as controller actions, so models and services they touch appear in the graph.

@@ -557,6 +557,33 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Service Provider Deferral
+    // -------------------------------------------------------------------------
+    // Reads what each provider declares about its own loading: whether it defers
+    // (implements Illuminate\Contracts\Support\DeferrableProvider), the service
+    // keys its provides() returns, and the events its when() names. Those keys are
+    // what Laravel's deferred manifest is built from, so the graph can say which
+    // resolution would register which provider — and can flag the three ways that
+    // machinery fails silently: an empty provides(), a promised key the provider
+    // never binds, and the pre-5.8 `protected $defer = true;` that nothing reads.
+    //
+    // The cost is a second walk over 'container_bindings.provider_paths' above.
+    // Parse results are shared across the whole build, so it re-reads nothing from
+    // disk — it is a tree traversal per provider, not a re-parse. Measured on this
+    // package's fixtures it is not visible against a full scan.
+    //
+    // Turn it off if your providers are generated or heavily metaprogrammed, so the
+    // declarations are computed rather than written out and the reading is mostly
+    // "cannot tell"; or simply to drop the extra step from very large scans. Off
+    // means the walk does not happen at all, not that its result is discarded.
+    //
+    // Override via the LARAVEL_BRAIN_SERVICE_PROVIDERS_ENABLED env variable.
+    //
+    'service_providers' => [
+        'enabled' => env('LARAVEL_BRAIN_SERVICE_PROVIDERS_ENABLED', true),
+    ],
+
+    // -------------------------------------------------------------------------
     // Facade Search Paths
     // -------------------------------------------------------------------------
     // Directories scanned for application-level facades — classes whose inheritance

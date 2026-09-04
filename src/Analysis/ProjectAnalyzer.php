@@ -108,6 +108,8 @@ class ProjectAnalyzer
     /** Whether this build reports the outgoing HTTP calls each node makes. */
     private bool $detectOutgoingHttp = true;
 
+    private bool $serviceProviderAnalysisEnabled = true;
+
     /** @var callable(string, array): void */
     private $onProgress;
 
@@ -230,6 +232,8 @@ class ProjectAnalyzer
         $this->sourcePaths = $sourcePaths;
         $this->detectOutgoingHttp = (bool) config('laravel-brain.outgoing_http.enabled', true);
         $this->graphBuilder->setDetectOutgoingHttp($this->detectOutgoingHttp);
+
+        $this->serviceProviderAnalysisEnabled = (bool) config('laravel-brain.service_providers.enabled', true);
         $this->graphBuilder->setSourcePaths($sourcePaths);
         $this->graphBuilder->setViewPaths($viewPaths);
         $this->graphBuilder->setCacheOperationsEnabled(
@@ -607,6 +611,17 @@ class ProjectAnalyzer
         $bindingCount = count($bindingRegistry->all());
         $this->emit('step:done', ['step' => 'container_bindings', 'count' => $bindingCount, 'unit' => 'binding', 'message' => "    Found {$bindingCount} container binding(s)"]);
 
+        // Gated around the walk, not around its result: turning the feature off has to stop the
+        // provider tree from being traversed at all, otherwise "disabled" costs the same as
+        // "enabled" and only hides the answer. Null here means the step never ran.
+        $providerRegistry = null;
+        if ($this->serviceProviderAnalysisEnabled) {
+            $this->emit('step:start', ['step' => 'deferred_providers', 'label' => 'Reading provider deferral', 'message' => '  → Reading service provider deferral...']);
+            $providerRegistry = (new ServiceProviderAnalyzer(null, $this->bindingProviderPaths))->analyze($projectRoot);
+            $deferredCount = count($providerRegistry->deferred());
+            $this->emit('step:done', ['step' => 'deferred_providers', 'count' => $deferredCount, 'unit' => 'deferred provider', 'message' => "    {$deferredCount} of ".count($providerRegistry->all()).' provider(s) are deferred']);
+        }
+
         $this->emit('step:start', ['step' => 'facades', 'label' => 'Scanning facades', 'message' => '  → Scanning application facades...']);
         $facadeRegistry = (new FacadeAnalyzer(null, $this->facadePaths))->analyze($projectRoot);
         $facadeRegistry->resolveWith($bindingRegistry);
@@ -678,6 +693,12 @@ class ProjectAnalyzer
         // a Filament page. Each of those passes creates its own job nodes, and a stamp written
         // before the pass that creates them would have nothing to write on.
         $this->graphBuilder->stampJobGroupRegions();
+
+        // Last, because addServiceProviders() indexes the graph by FQCN to find the services a
+        // deferred provider promises — anything added after it would be invisible to that index.
+        if ($providerRegistry !== null) {
+            $this->graphBuilder->addServiceProviders($providerRegistry);
+        }
 
         // A scoped run has built only the changed files' share of the graph; the rest of it comes
         // from the previous full run, with those files' nodes substituted in place.

@@ -2172,6 +2172,12 @@ body::before {
   color: #ce93d8;
 }
 
+.smell-badge--deferred {
+  background: rgba(202, 138, 4, 0.15);
+  border: 1px solid rgba(202, 138, 4, 0.4);
+  color: #fbc02d;
+}
+
 /* ── Code Metrics Grid ────────────────────────────── */
 .sidebar-section--metrics {}
 
@@ -3413,6 +3419,11 @@ body::before {
   color: #6a1b9a;
   background: rgba(170, 0, 255, 0.08);
   border-color: rgba(170, 0, 255, 0.3);
+}
+[data-theme="light"] .smell-badge--deferred {
+  color: #8a5a00;
+  background: rgba(202, 138, 4, 0.12);
+  border-color: rgba(202, 138, 4, 0.35);
 }
 
 /* Active toolbar button text — white is invisible on light */
