@@ -74,6 +74,22 @@ Channels registered through the `Broadcast` facade are found out of the box. If 
 ],
 ```
 
+## Broadcasting
+
+Separate from channel *registration* above, Brain also reads which events *broadcast*, and onto which channels. An event declares this about itself — implementing `ShouldBroadcast` (or `ShouldBroadcastNow`) and naming channels in `broadcastOn()` — so it's read from the class declaratively, with no dispatch trace needed: an event nothing traced ever reaches still shows what it would broadcast if dispatched.
+
+A matching channel gets a real edge from the event to it, labelled **broadcasts on**. Channels are matched by shape, not string equality — `orders.{id}` from the event and `orders.{orderId}` from `routes/channels.php` are recognised as the same channel — and a channel name built entirely from a runtime value is reported as computed rather than matched to a guess.
+
+The event's own detail panel gets a **Broadcasts** section: whether it broadcasts immediately or is queued first, its `broadcastAs()` alias when it overrides the class name, and any conditional or custom-payload logic (`broadcastWhen()`, `broadcastWith()`) it declares.
+
+```php
+// config/laravel-brain.php
+'broadcasting' => [
+    'enabled' => env('LARAVEL_BRAIN_BROADCASTING_ENABLED', true),
+    'paths' => ['app/Events'],
+],
+```
+
 ## Call chain tracing
 
 From each controller action (and Filament page method), the tracer follows:
@@ -161,6 +177,23 @@ discarding its result:
 ```dotenv
 LARAVEL_BRAIN_OUTGOING_HTTP_ENABLED=false
 ```
+
+## Cache operations
+
+Every method charted as a flow is also read for calls to the `Cache` facade and the `cache()` helper — including a `store()`/`driver()`/`tags()` chain in front of them — and shown on the node as a **Cache** section: one row per call, split into **read**, **write**, **invalidate**, and **lock**, with the key (a literal string shown as written, a constructed one labelled rather than guessed at, or "whole store" for a store-wide flush), plus any declared TTL, store, and tags. A matching step in the method's flowchart carries the same badge.
+
+`Cache::lock($key)->get(fn)` is read as a `lock`, and `Cache::memo()->get()` — Laravel's read-through memoization — is read as a `read`, the same as any other cache read.
+
+This is only the facade and the helper — an injected `$this->cache` property using the `Repository` contract directly is not recognised, since there's no fixed call shape to key detection on.
+
+```php
+// config/laravel-brain.php
+'cache_operations' => [
+    'enabled' => env('LARAVEL_BRAIN_CACHE_OPERATIONS_ENABLED', true),
+],
+```
+
+Turning it off is off at the source — no statement is inspected for a cache call at all, rather than a filter applied to results computed anyway. Measured over a 1,185-file, 5,571-method corpus with no cache calls in it, flow extraction goes from 11.5ms to 14.2ms with the pass on — the cost of looking and finding nothing; over source saturated with cache calls (1,000 methods, six calls each) it goes from 9.9ms to 18.4ms. Against a full scan of that same corpus (494ms) neither delta is measurable above run-to-run noise. Turn it off instead when the application wraps caching in its own abstraction rather than the facade, so what Brain can see would be a misleading fraction of what's actually cached — a half-true panel is worse than no panel.
 
 ## Blade views
 
@@ -316,6 +349,159 @@ Agents are ordinary application classes, so the scan follows `source_paths` by d
 `enabled` is a second, independent switch: it answers "this application uses the SDK and I still do not want it on the graph", which the string prefilter above cannot. Turning it off skips the pass before the directory scan, so nothing is read and nothing is parsed.
 
 
+## Macros
+
+Laravel's `Macroable` trait lets a class marked with it grow new methods at runtime — a macro is invisible by construction: `$table->money()` resolves to nothing if you open `Blueprint` itself, and nothing about the class explains where the method came from.
+
+Brain scans `macros.paths` (`app` by default) for two forms:
+
+- `X::macro('name', function (...) {...})` — one named method.
+- `X::mixin(new Y)` / `X::mixin(Y::class)` — every public, non-static, non-constructor method of `Y` becomes a method of `X`.
+
+Detection keys on the **call**, not on the receiver's own traits — Filament ships its own separate `Macroable`, so checking for Illuminate's specifically would silently miss every Filament component macro. What isn't attempted is resolving a *call site* back to its macro: proving `$table` is actually a `Blueprint` at the point `$table->money()` is called would need cross-file type inference the scanner doesn't do, and migrations aren't part of a scan's traced call chains anyway. This shows where a method is **defined**, not everywhere it's used.
+
+Each receiver class gets a `macro_group` node (labelled `ClassName (N)`) and each added method its own `macro` node underneath it, together in a dedicated **Macros** tab. Selecting a macro node shows where it comes from — `macro()`, one method at a time, or `mixin`, and which class it was mixed in from — and an edge to the file or provider that registered it.
+
+```php
+// config/laravel-brain.php
+'macros' => [
+    'enabled' => env('LARAVEL_BRAIN_MACROS_ENABLED', true),
+    'paths' => ['app'],
+],
+```
+
+Turning it off skips the scan for macro/mixin calls entirely, rather than hiding results computed anyway.
+
+## Transaction, chain & batch regions
+
+Three things a call chain can belong to are drawn as a boundary around the nodes that belong to it, rather than as a badge on any one of them — a `DB::transaction()` closure commits or rolls back as a unit, and `Bus::chain()`/`Bus::batch()` jobs are dispatched as a unit, so the canvas draws the unit.
+
+**Transactions.** A `DB::transaction(function () {...})` closure, or a hand-rolled `DB::beginTransaction()` … `DB::commit()` range, gets a dashed boundary around every node it runs, labelled "transaction 1", "transaction 2", and so on for however many a method opens. A `catch` block that rolls back gets its own separate boundary, so the rollback path reads apart from the happy path instead of overlapping it.
+
+```php
+// config/laravel-brain.php
+'transactions' => [
+    'enabled' => env('LARAVEL_BRAIN_TRANSACTIONS_ENABLED', true),
+],
+```
+
+The detector walks every method body the tracer scans, whether or not the application opens a single transaction — on a synthetic corpus with no `DB::transaction` at all, that walk measured +8.2% on a full 1,185-file scan. That's the price of confirming there's nothing to draw. Turning it off skips the walk rather than discarding its result, so off costs nothing at all.
+
+**Chains and batches.** The same drawing mechanism generalises to `Bus::chain([...])`, `Bus::batch([...])`, `Job::withChain([...])`, and `dispatch(...)->chain([...])` — literal entries in the array become a boundary around the jobs dispatched together: **chains** run in order, drawn with arrows through the sequence; **batches** run without one, drawn without them.
+
+| Region | Color | Ordered |
+|--------|-------|---------|
+| Transaction | Amber `#d99a2b` | — |
+| Rollback | Red `#c2554a` | — |
+| Chain | Blue `#5f8fa8` | Yes — arrows show run order |
+| Batch | Purple `#8a7fb5` | No |
+
+Only literal members are drawn — `Bus::chain([new A, new B])` — a member built from a variable, a factory call, or a spread expression is dropped from the drawing and reported unresolved, the same policy the rest of a scan uses for any dispatch it can't resolve statically. A batch nested inside a chain (or the reverse) isn't drawn.
+
+```php
+// config/laravel-brain.php
+'job_groups' => [
+    'enabled' => env('LARAVEL_BRAIN_JOB_GROUPS_ENABLED', true),
+],
+```
+
+Turning chains/batches off doesn't hide the jobs themselves — each member of a `Bus::chain([...])` is still traced as an edge — only the boundary drawn around them. It's independent of `transactions` above; turning either off doesn't affect the other.
+
+## Event choreography
+
+Every other tab grows forward from a route, a command, or some other single entry point. Events are different: a listener can itself fire further events, and that cascade doesn't belong to any one route — it's a property of the event system as a whole.
+
+The **Events** tab holds every event the application declares as its own graph: an edge to each listener that handles it, and an edge onward from that listener to any event *it* fires in turn — so a chain of events triggering each other is visible as a path, not just as separate one-hop facts. It's also where an event with no listeners at all — dispatched into the void — is easiest to spot, since it's a node with nothing leaving it.
+
+The facts behind the tab — listener count, whether it's an orphan, whether it broadcasts, whether it's queued (`ShouldQueue`), whether it fires before or after the enclosing transaction commits (`ShouldDispatchAfterCommit` / `ShouldHandleEventsAfterCommit`) — are also stamped onto that same event node wherever else it appears, so a route's own lifecycle graph shows them too, not only the dedicated tab.
+
+```php
+// config/laravel-brain.php
+'events' => [
+    'enabled' => true,
+    'paths' => ['app/Events'],
+],
+```
+
+## Job lifecycle
+
+Selecting a queued job node shows a **Queue behaviour** section: attempts, timeout, backoff, max exceptions, uniqueness (and its scope and duration, for a job implementing `ShouldBeUnique`), whether it's batchable, whether it dispatches after the enclosing transaction commits, whether its payload is encrypted, and any queue middleware it declares (`WithoutOverlapping`, for instance).
+
+This isn't a toggleable pass — a job that declares none of the above simply gets no section, since several blank fields would say less than nothing. Nor is it a graph overlay: unlike transactions and chains/batches above, a job's lifecycle facts live in its detail panel only, with no distinct color or boundary on the canvas.
+
+A property computed from a method body that reads runtime state, rather than written as a literal, is reported as "decided at runtime" rather than guessed at — the same policy the rest of a scan uses whenever a value depends on something the scan can't see.
+
+## Table statistics and database schema
+
+Two passes read the live database during a scan rather than parsing source — the only parts of a scan that touch a database at all.
+
+**Table statistics** read how much data each model's table actually holds: total size, a row-count estimate, and the heap/index split where the driver can answer for it. It's shown as a **Table Data** section on the model's node — row count (prefixed `~` when it's a planner estimate rather than an exact count; exact on SQL Server), table size, index size, and total.
+
+```php
+// config/laravel-brain.php
+'table_stats' => [
+    'enabled' => env('LARAVEL_BRAIN_TABLE_STATS', true),
+    'connection' => null, // set a connection name when models don't live on the default one
+],
+```
+
+**Database schema** reads each model's real columns, indexes, and foreign keys from the database catalogue — not from migrations, which say what was *intended*, and any project of age has a schema that no longer matches the sum of them. It's shown as a **Schema** tab on the model's node, and a foreign key with no covering index (its columns must be a leading prefix of some index's columns, not merely present in one) is flagged there — and again, alongside routes' own security exposure, in the shared **Risks** tab as a `MISSING_FK_INDEX` finding.
+
+```php
+// config/laravel-brain.php
+'schema' => [
+    'enabled' => env('LARAVEL_BRAIN_SCHEMA', true),
+    'connection' => null,
+    'timeout' => env('LARAVEL_BRAIN_SCHEMA_TIMEOUT', 2), // seconds; null uses the driver's own default (~30s)
+],
+```
+
+Both fail quietly by design: no connection, no permission on the catalogue, or a driver nobody anticipated all end as missing numbers rather than a failed scan, so leaving either on costs nothing where there's nothing to read. Both also need `Schema::getTables()`, added in Laravel 10 — on Laravel 9 they report nothing, by design, rather than erroring. `schema.timeout` exists because a *refused* connection fails instantly, but a host that drops packets (a database reached over a VPN that isn't up, say) blocks for the driver's full default — on every scan and every watch-mode poll — without it.
+
+## Morph map aliases
+
+`Relation::morphMap()` gives a model a short alias — the value that actually lands in your `*_type` columns, and so the one you're holding when you arrive from a row or a query rather than the class name you'd expect. Brain shows that alias on the model's node, beside its other schema facts.
+
+Unlike everything else in a scan, this one fact is read from the **running application** rather than parsed out of source: a scan runs inside your own app, so `Relation::morphMap()` already holds the whole answer, including aliases a package registered from its own provider or a branch only one environment takes — none of which a file parser alone could see. Where the application calls `Relation::requireMorphMap()`, a model left out of the map is flagged, since there's no class-name fallback in that mode — the first `getMorphClass()` call on it throws.
+
+```php
+// config/laravel-brain.php
+'morph_map' => [
+    'enabled' => env('LARAVEL_BRAIN_MORPH_MAP_ENABLED', true),
+],
+```
+
+Turning it off means `Relation::morphMap()` is never consulted at all — not consulted and the answer discarded — which is the escape hatch if you'd rather the scanner not touch framework state. Models still appear either way; they just carry no alias, and nothing is flagged as missing one.
+
+## File history and riskiest files
+
+Two more passes read git directly, rather than the application's source or its database.
+
+### A file's last commit
+
+A node's Source view — inline in the sidebar or in the popup (⤢) — shows who last committed its file and a side-by-side diff against the revision before it: author, date, message, and short hash. This is read on demand, once per file, the moment you open it — not precomputed at scan time — so it's always current between scans. It's the file's single most recent commit, not a browsable history.
+
+When the repository's `origin` remote points at a recognised host, the hash becomes a link out to that commit: `.../commit/<hash>` on GitHub (and GitHub Enterprise, which shares its URL shape), `.../-/commit/<hash>` on GitLab (nested subgroups included), `.../commits/<hash>` on Bitbucket. No remote, or a host Brain doesn't recognise, leaves the hash as plain text.
+
+MCP: `brain_get_file_history` returns the same commit metadata and diff for any node id, so an AI assistant can see recent authorship and change context before proposing an edit.
+
+### Riskiest files
+
+A scan-time pass counts how many commits touched each file in a recent window, then combines that with the file's own single most complex method into one ranking: complexity alone says a method is hard to read, commit frequency alone says a file is popular, and the two together are the "code as a crime scene" hotspot signal (Adam Tornhill's technique) — `riskScore = maxComplexity × commitCount`. The result surfaces two ways: a **Riskiest Files** panel in the sidebar (collapsed by default), and a **Git Activity** section — commit count, last-changed date, last author — on every node belonging to a file with recent commits, whether or not that file makes the ranking itself.
+
+```php
+// config/laravel-brain.php
+'churn' => [
+    'enabled' => env('LARAVEL_BRAIN_CHURN', true),
+    'since' => env('LARAVEL_BRAIN_CHURN_SINCE', '1 year ago'), // bounds cost to a fixed window regardless of repo age
+    'limit' => env('LARAVEL_BRAIN_CHURN_LIMIT', 50), // files kept in the ranking, highest risk first
+],
+```
+
+Like table statistics and schema above, this is the one part of a scan that shells out to git rather than the filesystem or a database, and it fails just as quietly: no git binary, no repository, or no commits in the window all end as an empty ranking rather than a failed scan. A rename resets a file's churn history — `git log --name-only` without `--find-renames` sees a rename as a delete plus an add — matching the underlying technique's usual simplicity rather than working around it.
+
+MCP: `brain_get_riskiest_files` returns the same ranked list.
+
 ## Reachability
 
 Every other tab is grown forward from one entry point, which means a gap in the graph is invisible from inside it. Measured on one application, the graph knew 45 of its 211 event classes and 27 of its 113 job classes, and no screen said so.
@@ -342,12 +528,12 @@ Every reference Brain *did* find is shown next to the class, so you can tell the
 A class with none of these is the one worth opening first — and still worth opening rather than deleting.
 :::
 
-The tab reads the classes declared under [`source_paths`](#source-paths-and-watch-mode) and costs one extra parse pass over them plus `config/`. Turn it off with:
+The tab reads the classes declared under [`source_paths`](#source-paths-and-watch-mode) and costs one extra parse pass over them plus `config/`. **Off by default** — the only setting in the config file that's a judgement call rather than a fact, because what that extra pass costs depends entirely on how much of the codebase the rest of the scan already parses on its own: measured worst case ×3.0 the scan time (an app whose normal build only touches a fraction of its total classes), measured best case +2% (within noise — an app whose modules are nearly all already parsed for other reasons). Turn it on when you're hunting for what nothing reaches; leave it off for a scan you run often:
 
 ```php
-// config/laravel-brain.php
+// config/laravel-brain.php — off by default
 'reachability' => [
-    'enabled' => false, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=false
+    'enabled' => true, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=true
 ],
 ```
 
@@ -358,7 +544,10 @@ The tab reads the classes declared under [`source_paths`](#source-paths-and-watc
 | Route | <span class="color-dot" style="background:#4CAF50"></span> Green `#4CAF50` | HTTP endpoint (`GET /users`) |
 | Middleware | <span class="color-dot" style="background:#FF9800"></span> Orange `#FF9800` | Middleware applied to a route |
 | Controller | <span class="color-dot" style="background:#2196F3"></span> Blue `#2196F3` | Controller class |
-| Action | <span class="color-dot" style="background:#03A9F4"></span> Light Blue `#03A9F4` | Controller method |
+| Controller action | <span class="color-dot" style="background:#03A9F4"></span> Light Blue `#03A9F4` | Controller method (node type `action`) |
+| Action | <span class="color-dot" style="background:#84cc16"></span> Lime `#84cc16` | Single-purpose action class under `Actions/` (node type `action_class`) |
+| Macro Receiver | <span class="color-dot" style="background:#B45309"></span> Dark Amber `#B45309` | A class that methods were added to via `macro()`/`mixin()` |
+| Macro | <span class="color-dot" style="background:#F59E0B"></span> Amber `#F59E0B` | A method added to a class it wasn't declared on |
 | Service | <span class="color-dot" style="background:#9C27B0"></span> Purple `#9C27B0` | Service or helper class |
 | Model | <span class="color-dot" style="background:#F44336"></span> Red `#F44336` | Eloquent model |
 | Event | <span class="color-dot" style="background:#FFD600"></span> Yellow `#FFD600` | Laravel event |

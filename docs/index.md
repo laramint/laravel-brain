@@ -58,7 +58,9 @@ Laravel Brain is a dev-only tool, installed with `--dev`. Its routes, commands, 
 - **Artisan command discovery** — Maps class-based commands, closure commands from `routes/console.php`, and Kernel-registered commands
 - **Scheduler tracing** — Lists every scheduled task (`command`, `job`, `call`) with the time it runs, its timezone, and its overlap/one-server guards
 - **Broadcast channel mapping** — Discovers class-based and closure channels from `routes/channels.php`
+- **Broadcasting** — Reads `ShouldBroadcast`/`broadcastOn()` from each event and draws an edge to the channel(s) it broadcasts on, with the alias, queue, and payload shape in the event's detail panel
 - **DB query tracing** — Surfaces Eloquent and raw queries per method
+- **Outgoing HTTP detection** — Flags Laravel HTTP client, Guzzle, curl, and `file_get_contents` calls that leave the application, with host, method, timeout and retry — including requests built in one class and sent from another
 - **Cache operation tracing** — Surfaces `Cache::` facade and `cache()` helper calls per method, split into read / write / invalidate / lock, with the key (literal or constructed — a computed one is labelled, never guessed), plus tags, store and TTL where declared
 - **Fat-class detection** — Flags controllers and services with more than 300 lines or 10 methods
 - **Cyclomatic complexity** — Highlights hotspots by complexity tier (Low / Moderate / High / Critical)
@@ -66,6 +68,19 @@ Laravel Brain is a dev-only tool, installed with `--dev`. Its routes, commands, 
 - **Per-route tabs** — Each route gets its own isolated subgraph tab
 - **Middleware mapping** — Shows which middleware guards each route
 - **Model relationships** — Displays `hasMany`, `belongsTo`, and other Eloquent relations
+- **Table statistics** — Row count (estimated or exact) and table/index size for every model's table, read live from the database
+- **Database schema** — Real columns, indexes, and foreign keys read from the database catalogue rather than migrations, flagging a foreign key with no covering index
+- **Morph map aliases** — Shows the alias `Relation::morphMap()` gives each model — the value that actually lands in `*_type` columns — and flags a model an enforced map leaves out
+- **Macro detection** — Finds methods the application adds to existing classes via `Macroable::macro()`/`::mixin()` (Filament's own `Macroable` included) and draws them as their own node kind, so a call like `$table->money()` isn't a dead end when you go looking for where it came from
+- **Transaction boundaries** — Draws a dashed boundary around every node that runs inside a `DB::transaction()` closure (or a manual begin/commit range), with a rollback path in a `catch` block boundaried separately
+- **Job chains & batches** — Draws a boundary around jobs dispatched together via `Bus::chain()`/`Bus::batch()`/`withChain()`, with arrows through a chain in its run order
+- **Event choreography** — A dedicated Events tab traces listener cascades — a listener that fires further events, not just the one hop from dispatch to handler — and flags events with no listener at all
+- **Job lifecycle** — Shows a job's attempts, timeout, backoff, uniqueness, batching, after-commit dispatch, and queue middleware in its detail panel
+- **Deferred provider diagnostics** — Flags a deferred service provider that never boots, a `provides()` key nothing backs, or the legacy `$defer` property the framework no longer reads
+- **Reachability inventory** — An inventory of every entry point the application has (routes, commands, schedules, channels, listeners, Filament panels) and the classes nothing traced reaches from one — off by default, since the pass can cost as much as the rest of the scan combined
+- **laravel/ai agent tracing** — Puts `laravel/ai` agents and the tools they expose to the model on the graph, with a standalone tab so an agent nothing else reaches is still visible
+- **File history & diffs** — See who last committed a file and what changed: a side-by-side diff against the previous revision, right in the source viewer, with a commit-hash chip linking out to GitHub, GitLab, or Bitbucket when a remote is configured
+- **Riskiest files** — Files ranked by recent commit frequency × their single most complex method — the "code as a crime scene" hotspot signal (complexity alone says a method is hard to read; churn alone says a file is popular; together they say where the next bug is likeliest)
 - **Observer discovery** — Finds Eloquent observers (`#[ObservedBy]`, `Model::observe()`, or `booted()`) and links them to the models they observe
 - **Policy resolution** — Resolves each model's authorization policy (explicit map, `#[UsePolicy]` attribute, or naming convention) and links it in the graph
 - **View composition mapping** — Traces `@include`, `@extends`, `@component`, `@each`, and `<x-...>` components as view → view edges, so a shared partial shows every entry point it reaches

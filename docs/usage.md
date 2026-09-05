@@ -51,6 +51,10 @@ Navigate to `/_laravel-brain` in your browser while your Laravel app is running 
 | Flowchart popup | Click ⤢ in flow section to open large view |
 | View sequence diagram | Click a route node → Sequence Diagram section in sidebar |
 | See what a method caches | Click a node → Info tab → Cache section |
+| See a node's outgoing HTTP calls | Click a node → Info tab → Outgoing HTTP section |
+| See a job's queue behaviour | Click a job node → Queue behaviour section |
+| See a file's last commit & diff | Click a node → Source tab — shown automatically below the file |
+| Browse riskiest files | Sidebar → Riskiest Files panel |
 | Filter by type | Filter panel on the left |
 | Fit all nodes | Toolbar → Fit button |
 | Export PNG | Toolbar → Export → Download PNG |
@@ -167,6 +171,8 @@ claude mcp add brain -- php artisan mcp:start brain
 | `brain_get_subgraph` | One tab's nodes and edges by id |
 | `brain_get_graph` | The full merged graph, optionally filtered by node type |
 | `brain_get_agent_rules` | The content `brain:generate-rules` would write, for any target, without writing it |
+| `brain_get_file_history` | Who last committed a scanned file and the diff that commit introduced, by node id |
+| `brain_get_riskiest_files` | Files ranked by commit frequency × their most complex method — where to look first |
 | `brain_rescan` | Re-scans and persists a fresh graph — every other tool reads whatever was scanned last |
 
 Every tool reads the last persisted scan, not the live filesystem — call `brain_rescan` after code changes before trusting the rest. Set `LARAVEL_BRAIN_MCP_ENABLED=false` to disable the server without removing the package.

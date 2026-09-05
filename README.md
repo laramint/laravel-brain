@@ -37,17 +37,28 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Artisan command discovery** — Maps class-based commands, closure commands from `routes/console.php`, and Kernel-registered commands
 - **Scheduler tracing** — Lists every scheduled task (`command`, `job`, `call`) with the time it runs, its timezone, and its overlap/one-server guards
 - **Broadcast channel mapping** — Discovers class-based and closure channels from `routes/channels.php`
+- **Broadcasting** — Reads `ShouldBroadcast`/`broadcastOn()` from each event and draws an edge to the channel(s) it broadcasts on, with the alias, queue, and payload shape in the event's detail panel
 - **DB query tracing** — Surfaces Eloquent and raw queries per method
+- **Outgoing HTTP detection** — Flags Laravel HTTP client, Guzzle, curl, and `file_get_contents` calls that leave the application, with host, method, timeout and retry — including requests built in one class and sent from another
 - **Cache operation tracing** — Surfaces `Cache::` facade and `cache()` helper calls per method, split into read / write / invalidate / lock, with the key (literal or constructed — a computed one is labelled, never guessed), plus tags, store and TTL where declared
+- **Macro detection** — Finds methods the application adds to existing classes via `Macroable::macro()`/`::mixin()` (Filament's own `Macroable` included) and draws them as their own node kind, so a call like `$table->money()` isn't a dead end when you go looking for where it came from
+- **Transaction boundaries** — Draws a dashed boundary around every node that runs inside a `DB::transaction()` closure (or a manual begin/commit range), with a rollback path in a `catch` block boundaried separately
+- **Job chains & batches** — Draws a boundary around jobs dispatched together via `Bus::chain()`/`Bus::batch()`/`withChain()`, with arrows through a chain in its run order
+- **Event choreography** — A dedicated Events tab traces listener cascades — a listener that fires further events, not just the one hop from dispatch to handler — and flags events with no listener at all
+- **Job lifecycle** — Shows a job's attempts, timeout, backoff, uniqueness, batching, after-commit dispatch, and queue middleware in its detail panel
 - **Fat-class detection** — Flags controllers and services with more than 300 lines or 10 methods
 - **Cyclomatic complexity** — Highlights hotspots by complexity tier (Low / Moderate / High / Critical)
 - **Interactive graph** — Dark/light theme, accent-colored nodes, and interactive edges
 - **Per-route tabs** — Each route gets its own isolated subgraph tab
 - **Middleware mapping** — Shows which middleware guards each route
 - **Model relationships** — Displays `hasMany`, `belongsTo`, and other Eloquent relations
+- **Table statistics** — Row count (estimated or exact) and table/index size for every model's table, read live from the database
+- **Database schema** — Real columns, indexes, and foreign keys read from the database catalogue rather than migrations, flagging a foreign key with no covering index
+- **Morph map aliases** — Shows the alias `Relation::morphMap()` gives each model — the value that actually lands in `*_type` columns — and flags a model an enforced map leaves out
 - **Action recognition** — Draws single-purpose action classes (one class, one `__invoke`/`handle`/`execute`, filed under `Actions/`) as their own kind rather than as generic services, and surfaces the entry method they are invoked through
 - **Observer discovery** — Finds Eloquent observers (`#[ObservedBy]`, `Model::observe()`, or `booted()`) and links them to the models they observe
 - **Policy resolution** — Resolves each model's authorization policy (explicit map, `#[UsePolicy]` attribute, or naming convention) and links it in the graph
+- **Deferred provider diagnostics** — Flags a deferred service provider that never boots, a `provides()` key nothing backs, or the legacy `$defer` property the framework no longer reads
 - **View composition mapping** — Traces `@include`, `@extends`, `@component`, `@each`, and `<x-...>` components as view → view edges, so a shared partial shows every entry point it reaches
 - **API resource edges** — Traces `UserResource::make()`/`::collection()`/`new` and nested resource composition as edges, so a changed resource shows every controller and resource that uses it
 - **Method flowcharts** — See internal flow as a step-by-step diagram with a large modal popup view
@@ -56,9 +67,13 @@ The scan writes JSON graph files to `storage/app/laravel-brain/`. The viewer is 
 - **Export** — Export any graph as PNG or Mermaid diagram
 - **Multiple layouts** — Hierarchical (dagre), force-directed (cose-bilkent), breadth-first, circle, grid
 - **Watch mode** — Auto-rescans on PHP file changes; a change confined to `app/` re-traces only the affected controllers and merges the result into the previous graph instead of rebuilding it from scratch
+- **Reachability inventory** — An inventory of every entry point the application has (routes, commands, schedules, channels, listeners, Filament panels) and the classes nothing traced reaches from one — off by default, since the pass can cost as much as the rest of the scan combined
 - **Route stress test** — From a selected **route** node, run concurrent HTTP load against that endpoint (via [`laramint/laravel-stress`](https://github.com/LaraMint/laravel-stress)): configure request count, concurrency, headers, body, and timeout; see timing percentiles (min/avg/p50/p95/p99/max), throughput, and status distribution in the sidebar. While a run is active, the graph highlights the route and animates packets along the request path
+- **laravel/ai agent tracing** — Puts `laravel/ai` agents and the tools they expose to the model on the graph, with a standalone tab so an agent nothing else reaches is still visible
 - **AI context export** — Copy a deterministic, token-optimized context snapshot for any node to your clipboard with one click (🤖 button in the sidebar). Also available as `brain:export-context` Artisan command and `GET /_laravel-brain/api/context` API endpoint. Context includes call chain, complexity hotspots, DB operations, cache operations, source snippets, and all backend/frontend packages — always reproducible from the same scan data
-- **AI rules generation** — Generate ready-to-use context files for seven AI coding assistants (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains Junie, Aider, AGENTS.md) directly from the UI (**Export → Generate AI Rules**) or via `brain:generate-rules`. Each file is populated with your project's real architecture, routes, packages, and code-health data
+- **AI rules generation** — Generate ready-to-use context files for eight AI coding assistants (Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains Junie, Aider, AGENTS.md, OpenAI Codex) directly from the UI (**Export → Generate AI Rules**) or via `brain:generate-rules`. Each file is populated with your project's real architecture, routes, packages, and code-health data
+- **File history & diffs** — See who last committed a file and what changed: a side-by-side diff against the previous revision, right in the source viewer, with a commit-hash chip linking out to GitHub, GitLab, or Bitbucket when a remote is configured
+- **Riskiest files** — Files ranked by recent commit frequency × their single most complex method — the "code as a crime scene" hotspot signal (complexity alone says a method is hard to read; churn alone says a file is popular; together they say where the next bug is likeliest)
 
 ## Requirements
 
@@ -186,6 +201,7 @@ php artisan brain:generate-rules --force
 | `junie` | `.junie/guidelines.md` | JetBrains AI / Junie |
 | `aider` | `CONVENTIONS.md` | Aider (`aider --read CONVENTIONS.md`) |
 | `agents` | `AGENTS.md` | Universal open standard — 60+ tools |
+| `codex` | `CODEX.md` | OpenAI Codex CLI & IDE extension |
 
 Each generated file contains your project's tech stack, architecture counts, top routes, complexity hotspots, detected code smells, and full package lists. Re-run after every scan to keep the files current.
 
@@ -218,6 +234,8 @@ claude mcp add brain -- php artisan mcp:start brain
 | `brain_get_subgraph` | One tab's nodes and edges by id |
 | `brain_get_graph` | The full merged graph, optionally filtered by node type |
 | `brain_get_agent_rules` | The content `brain:generate-rules` would write, for any target, without writing it |
+| `brain_get_file_history` | Who last committed a scanned file and the diff that commit introduced, by node id |
+| `brain_get_riskiest_files` | Files ranked by commit frequency × their most complex method — where to look first |
 | `brain_rescan` | Re-scans and persists a fresh graph — every other tool reads whatever was scanned last |
 
 Every tool reads the last persisted scan, not the live filesystem — call `brain_rescan` after code changes before trusting the rest. Set `LARAVEL_BRAIN_MCP_ENABLED=false` to disable the server without removing the package.
@@ -513,10 +531,12 @@ unqualified label to `action_class` and calls `action` a **Controller action**.
 Every other tab is grown forward from one entry point, so a gap in the graph is invisible from inside it — measured on one application, the graph knew 45 of its 211 event classes and 27 of its 113 job classes, and no screen said so.
 The **Reachability** tab is the inverse view: an inventory of every entry point (routes, console commands, scheduled entries, broadcast channels, queued listeners, Filament panels/resources/pages), and the classes under `source_paths` that no entry point's traced call chain arrives at, grouped by kind so "17 jobs nothing dispatches" is answerable at a glance.
 **It is not a dead-code report.** "Nothing reaches this from a traced entry point" is a statement about the tracer, not about whether the code runs: a class resolved out of the container, fronted by a facade, named as a string in config, or built by reflection is alive and still lands on the list. Every reference Brain *did* find — container binding, facade, `config/`, inherited by a reached class, named as a class-string elsewhere — is shown next to the class, so the two cases can be told apart. Service providers and exceptions, which Brain has no call edge for at all, are filed in a section of their own rather than mixed in.
+
+**Off by default** — the only setting in the config file that's a judgement call rather than a fact. The pass opens every declared class, and what that costs depends entirely on how much of the codebase the rest of the scan already parses on its own: measured worst case ×3.0 the scan time (an app whose normal build only touches a fraction of its total classes), measured best case +2% (within noise — an app whose modules are nearly all already parsed for other reasons). What doesn't vary is the shape of the answer: on a large modular application 79–90% of declared classes come back unreached, and a list that long is read once and then ignored. Turn it on when you're hunting for what nothing reaches; leave it off for a scan you run often.
 ```php
-// config/laravel-brain.php — on by default
+// config/laravel-brain.php — off by default
 'reachability' => [
-    'enabled' => false, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=false
+    'enabled' => true, // or LARAVEL_BRAIN_REACHABILITY_ENABLED=true
 ],
 ```
 
@@ -529,6 +549,8 @@ The **Reachability** tab is the inverse view: an inventory of every entry point 
 | Controller | Blue `#2196F3` | Controller class |
 | Controller action | Light Blue `#03A9F4` | Controller method (node type `action`) |
 | Action | Lime `#84cc16` | Single-purpose action class under `Actions/` (node type `action_class`) |
+| Macro Receiver | Dark Amber `#B45309` | A class that methods were added to via `macro()`/`mixin()` |
+| Macro | Amber `#F59E0B` | A method added to a class it wasn't declared on |
 | Service | Purple `#9C27B0` | Service or helper class |
 | Model | Red `#F44336` | Eloquent model |
 | Event | Yellow `#FFD600` | Laravel event |
@@ -559,6 +581,10 @@ The **Reachability** tab is the inverse view: an inventory of every entry point 
 | Flowchart popup | Click ⤢ in flow section to open large view |
 | View sequence diagram | Click a route node → Sequence Diagram section in sidebar |
 | See what a method caches | Click a node → Info tab → Cache section |
+| See a node's outgoing HTTP calls | Click a node → Info tab → Outgoing HTTP section |
+| See a job's queue behaviour | Click a job node → Queue behaviour section |
+| See a file's last commit & diff | Click a node → Source tab — shown automatically below the file |
+| Browse riskiest files | Sidebar → Riskiest Files panel |
 | Filter by type | Filter panel on the left |
 | Fit all nodes | Toolbar → Fit button |
 | Export PNG | Toolbar → Export → Download PNG |
