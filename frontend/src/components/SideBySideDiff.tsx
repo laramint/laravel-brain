@@ -44,15 +44,23 @@ function Pane({
   const text = rows.map((r) => r[side].text).join('\n')
   const style = theme === 'dark' ? atomOneDark : atomOneLight
 
-  // The actual horizontal scroll container is the <pre> the highlighter renders internally
-  // (it carries its own overflow-x: auto from the theme), not this wrapper div — react-
-  // syntax-highlighter doesn't forward a ref to it, so we find it via the DOM after mount and
-  // wire scroll sync to the real element rather than to a wrapper that never scrolls.
+  // The actual scroll container — both axes — is the <pre> the highlighter renders internally
+  // (it carries its own overflow-x: auto from the theme, and per spec that forces overflow-y
+  // to behave as auto too, since one axis can't stay "visible" while the other isn't), not
+  // this wrapper div — react-syntax-highlighter doesn't forward a ref to it, so it's found via
+  // the DOM after mount. .diff-gutter has no scroll container of its own (see its CSS): it's
+  // kept aligned by copying <pre>'s scrollTop here, on every scroll event <pre> fires for any
+  // reason — a wheel event over the code, or the cross-pane sync below setting scrollTop
+  // programmatically, both fire the same native event.
   useEffect(() => {
     const pre = wrapperRef.current?.querySelector('pre');
+    const gutter = wrapperRef.current?.querySelector<HTMLDivElement>('.diff-gutter');
     if (!pre) return;
 
-    const handleScroll = () => onScroll(pre.scrollLeft, pre.scrollTop);
+    const handleScroll = () => {
+      if (gutter) gutter.scrollTop = pre.scrollTop;
+      onScroll(pre.scrollLeft, pre.scrollTop);
+    };
     pre.addEventListener('scroll', handleScroll);
 
     return () => pre.removeEventListener('scroll', handleScroll);

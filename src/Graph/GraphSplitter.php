@@ -759,6 +759,7 @@ class GraphSplitter
         string $projectName,
         string $analyzedAt,
         int $totalRoutes,
+        array $riskiestFiles = [],
     ): string {
         $tabs = [];
         foreach ($manifest as $entry) {
@@ -789,7 +790,7 @@ class GraphSplitter
             $tabs[] = $tab;
         }
 
-        $json = json_encode([
+        $payload = [
             'project' => $projectName,
             'analyzedAt' => $analyzedAt,
             // Bumped to 2 when edge ids became content-addressed (stable across rebuilds) instead
@@ -799,7 +800,13 @@ class GraphSplitter
             'totalNodes' => $fullGraph->nodeCount(),
             'totalEdges' => $fullGraph->edgeCount(),
             'tabs' => $tabs,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        ];
+
+        if ($riskiestFiles !== []) {
+            $payload['riskiestFiles'] = $riskiestFiles;
+        }
+
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
         if ($json === false) {
             throw new \RuntimeException('Failed to encode manifest to JSON: '.json_last_error_msg());

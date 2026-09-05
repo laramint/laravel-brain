@@ -1,8 +1,9 @@
 import { useRef, useState, useCallback, useMemo } from 'react'
 import { FilterPanel } from './FilterPanel'
+import { RiskiestFilesPanel } from './RiskiestFilesPanel'
 import { Tooltip } from './Tooltip'
 import { ACCENT_COLORS, SECURITY_RISK_COLORS, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
-import type { TabEntry, GraphData, ScheduleInfo } from '../types/graph'
+import type { TabEntry, GraphData, ScheduleInfo, FileRiskEntry } from '../types/graph'
 
 const RISK_ORDER: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 4 }
 
@@ -36,6 +37,8 @@ interface Props {
   onComplexityFilterChange: (f: 'all' | 'complex' | 'critical') => void
   onNodeSelect: (id: string) => void
   selectedId: string | null
+  riskiestFiles?: FileRiskEntry[]
+  theme: 'dark' | 'light'
 }
 
 // Membership in this map is what makes a method visible to the sidebar at all: `splitLabel`,
@@ -516,6 +519,7 @@ export function LeftSidebar({
   tabs, activeId, loadingId, onSelect,
   mode, onModeChange, previousAnalyzedAt,
   visibleTypes, counts, onToggle, onShowAll, onHideAll,
+  riskiestFiles, theme,
 }: Props) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [search, setSearch] = useState('')
@@ -666,6 +670,8 @@ export function LeftSidebar({
             </button>
           ))}
         </div>
+
+        <RiskiestFilesPanel files={riskiestFiles} theme={theme} />
 
         <div className="left-content">
           {mode === 'routes' && (

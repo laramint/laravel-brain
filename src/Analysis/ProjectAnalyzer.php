@@ -113,6 +113,14 @@ class ProjectAnalyzer
 
     private ?int $schemaTimeout = null;
 
+    private bool $churnEnabled = true;
+
+    private string $churnSince = '1 year ago';
+
+    private int $churnMaxOutputBytes = 20_000_000;
+
+    private int $churnLimit = 50;
+
     /**
      * Class-file search roots, relative to the project root.
      *
@@ -268,6 +276,12 @@ class ProjectAnalyzer
         $this->schemaTimeout = is_numeric($schemaTimeout) && (int) $schemaTimeout > 0
             ? (int) $schemaTimeout
             : null;
+
+        $this->churnEnabled = (bool) config('laravel-brain.churn.enabled', true);
+        $this->churnSince = (string) config('laravel-brain.churn.since', '1 year ago');
+        $this->churnMaxOutputBytes = (int) config('laravel-brain.churn.max_output_bytes', 20_000_000);
+        $this->churnLimit = (int) config('laravel-brain.churn.limit', 50);
+
         $this->sourcePaths = $sourcePaths;
         $this->detectOutgoingHttp = (bool) config('laravel-brain.outgoing_http.enabled', true);
         $this->graphBuilder->setDetectOutgoingHttp($this->detectOutgoingHttp);
@@ -641,6 +655,12 @@ class ProjectAnalyzer
         $dbQueryMap = $this->queryTracer->buildQueryMap($callChain, $controllers, $psr4Map, $projectRoot);
         $this->emit('step:done', ['step' => 'queries', 'count' => count($dbQueryMap), 'unit' => 'action', 'message' => '    Found DB query info for '.count($dbQueryMap).' action(s)']);
 
+        $this->emit('step:start', ['step' => 'churn', 'label' => 'Reading git history', 'message' => '  → Reading git commit history...']);
+        $churnByFile = $this->churnEnabled
+            ? (new GitChurnAnalyzer)->scan($projectRoot, $this->churnSince, $this->churnMaxOutputBytes)
+            : [];
+        $this->emit('step:done', ['step' => 'churn', 'count' => count($churnByFile), 'unit' => 'file', 'message' => '    Found commit history for '.count($churnByFile).' file(s)']);
+
         $this->emit('step:start', ['step' => 'security', 'label' => 'Security surface map', 'message' => '  → Building security surface map...']);
         $externalByFile = (new ExternalSecurityScanner)->scan($projectRoot);
         $securityMap = $this->securityAnalyzer->analyze($routes, $middlewareRegistry, $controllers, $projectRoot, $externalByFile);
@@ -792,6 +812,14 @@ class ProjectAnalyzer
             $eventFacts->stamp($fullGraph);
         }
 
+        // After every node-adding pass (including stampJobGroupRegions(), the last of them) and
+        // after the incremental merge above, so every node in the final $fullGraph — freshly
+        // built or carried over from a scoped rebuild — gets a churn stamp; before the split,
+        // since the ranking needs the complete graph but the split does not need the ranking.
+        $riskiestFiles = $this->churnEnabled
+            ? (new FileRiskRanker)->apply($fullGraph, $churnByFile, $this->churnLimit)
+            : [];
+
         $this->emit('step:start', ['step' => 'split', 'label' => 'Splitting into tab subgraphs', 'message' => '  → Splitting into tab subgraphs...']);
         $split = $this->graphSplitter->split($fullGraph, $routes, $commands, $channels, $schedules, $projectName, $analyzedAt, $filamentResult['panels'], $filamentResult['resources'], $filamentResult['pages']);
 
@@ -882,7 +910,7 @@ class ProjectAnalyzer
         $this->emit('step:done', ['step' => 'split', 'count' => count($split['subgraphs']), 'unit' => 'tab', 'message' => '    '.count($split['subgraphs']).' tab(s) generated']);
 
         $manifestJson = $this->graphSplitter->buildManifestJson(
-            $split['manifest'], $fullGraph, $projectName, $analyzedAt, count($routes),
+            $split['manifest'], $fullGraph, $projectName, $analyzedAt, count($routes), $riskiestFiles,
         );
 
         $result = new AnalysisResult(

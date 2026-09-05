@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react'
-import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation, HttpCall } from '../types/graph'
+import type { GraphData, GraphNode, GraphEdge, FlowStep, DbQuery, CacheOperation, HttpCall, NodeChurnData } from '../types/graph'
 import { UNFOLLOWABLE_REFERENCE_LABELS } from '../types/graph'
 import { SECURITY_EXPOSURE_COLORS, SECURITY_EXPOSURE_COLORS_LIGHT, SECURITY_RISK_COLORS, SECURITY_ISSUE_META, SECURITY_SEVERITY_LABELS } from '../utils/graphConstants'
 import { FlowchartView } from './FlowchartView'
@@ -345,6 +345,7 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
       key !== 'erd' &&
       key !== 'tableStats' &&
       key !== 'schema' &&
+      key !== 'churn' &&
       key !== 'event' &&
       key !== 'listener' &&
       key !== 'job' &&
@@ -634,6 +635,36 @@ export function Sidebar({ selectedId, graphData, theme, onClose, onStressChange 
                   </div>
                 </div>
               )}
+
+              {(() => {
+                const churn = node.data?.churn as NodeChurnData | undefined
+                if (!churn) return null
+                return (
+                  <div className="sidebar-section">
+                    <h3>Git Activity</h3>
+                    <div className="metrics-grid metrics-grid--2col">
+                      <Tooltip content="Commits touching this file in the configured churn window (default: the last year).">
+                        <div className="metric-item">
+                          <span className="metric-value">{churn.commitCount}</span>
+                          <span className="metric-label">Commits</span>
+                        </div>
+                      </Tooltip>
+                      <Tooltip content="Most recent commit date for this file within that window.">
+                        <div className="metric-item">
+                          <span className="metric-value metric-value--date">{churn.lastChangedAt}</span>
+                          <span className="metric-label">Last Changed</span>
+                        </div>
+                      </Tooltip>
+                    </div>
+                    {churn.lastAuthor && (
+                      <div className="prop-row" style={{ marginTop: 8 }}>
+                        <span className="prop-key">last author</span>
+                        <span className="prop-value">{churn.lastAuthor}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {node.type === 'filament_resource' && !!node.data?.route && (
                 <div className="sidebar-section">

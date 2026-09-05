@@ -33,7 +33,7 @@ class GitHistoryInspector
     private const MAX_OUTPUT_BYTES = 200_000;
 
     /**
-     * @return array{hash: string, shortHash: string, authorName: string, authorEmail: string, date: string, subject: string, diff: string, truncated: bool, oldContent: string|null, newContent: string|null, oldContentTruncated: bool, newContentTruncated: bool}|null
+     * @return array{hash: string, shortHash: string, authorName: string, authorEmail: string, date: string, subject: string, diff: string, truncated: bool, oldContent: string|null, newContent: string|null, oldContentTruncated: bool, newContentTruncated: bool, remoteCommitUrl: string|null}|null
      *
      * null when: git/binary unavailable, not a git repository, or the file has no commits
      * (untracked / never committed). Callers must pass an already-validated, realpath'd,
@@ -64,8 +64,76 @@ class GitHistoryInspector
 
         [$commit['newContent'], $commit['newContentTruncated']] = $this->readBlob($commit['hash'].':'.$relative, $projectRoot);
         [$commit['oldContent'], $commit['oldContentTruncated']] = $this->readBlob($commit['hash'].'^:'.$relative, $projectRoot);
+        $commit['remoteCommitUrl'] = $this->remoteCommitUrl($commit['hash'], $projectRoot);
 
         return $commit;
+    }
+
+    /**
+     * The URL for viewing this commit on whatever host `origin` points at — GitHub, GitLab,
+     * Bitbucket, or a self-hosted instance of any of them (detected by a substring match on
+     * the host, since a self-hosted GitLab commonly names itself gitlab.<company>.com rather
+     * than gitlab.com). Null when there is no `origin` remote or its URL does not resolve to
+     * a host and path this can template a URL from — never a reason to fail the rest of
+     * lastCommit().
+     */
+    private function remoteCommitUrl(string $hash, string $projectRoot): ?string
+    {
+        $result = $this->run(['git', 'remote', 'get-url', 'origin'], $projectRoot);
+        if ($result === null || $result['exitCode'] !== 0) {
+            return null;
+        }
+
+        $remote = $this->parseRemote(trim($result['stdout']));
+        if ($remote === null) {
+            return null;
+        }
+        [$host, $path] = $remote;
+
+        if (str_contains($host, 'gitlab')) {
+            return "https://{$host}/{$path}/-/commit/{$hash}";
+        }
+        if (str_contains($host, 'bitbucket')) {
+            return "https://{$host}/{$path}/commits/{$hash}";
+        }
+
+        return "https://{$host}/{$path}/commit/{$hash}";
+    }
+
+    /**
+     * @return array{0: string, 1: string}|null [host, path] — path has no leading/trailing
+     *                                          slash and no trailing .git. Credentials embedded in an https URL (`user@host`
+     *                                          or `user:pass@host`) are read by parse_url() into their own components and
+     *                                          never touched here, so they cannot reach the templated URL even by accident.
+     */
+    private function parseRemote(string $url): ?array
+    {
+        if ($url === '') {
+            return null;
+        }
+
+        if (str_contains($url, '://')) {
+            $parts = parse_url($url);
+            $host = $parts['host'] ?? null;
+            $path = $parts['path'] ?? '';
+        } elseif (preg_match('#^(?:[^/@]+@)?([^/:]+):(.+)$#', $url, $m)) {
+            // scp-like syntax: [user@]host:path — e.g. git@github.com:owner/repo.git
+            $host = $m[1];
+            $path = $m[2];
+        } else {
+            return null;
+        }
+
+        if (! is_string($host) || $host === '') {
+            return null;
+        }
+
+        $path = trim((string) $path, '/');
+        if (str_ends_with($path, '.git')) {
+            $path = substr($path, 0, -4);
+        }
+
+        return $path === '' ? null : [$host, $path];
     }
 
     /**

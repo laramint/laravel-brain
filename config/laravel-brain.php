@@ -797,6 +797,39 @@ return [
     ],
 
     // -------------------------------------------------------------------------
+    // Git Churn (Riskiest Files)
+    // -------------------------------------------------------------------------
+    // How often each file has changed recently, read from `git log` during a scan and
+    // combined with that file's own most complex method into a single ranking: a file
+    // that changes constantly AND has a genuinely complex method in it is the "code as a
+    // crime scene" hotspot the technique this mirrors (Adam Tornhill) is named for —
+    // complexity alone just says a method is hard to read, commit frequency alone just
+    // says a file is popular.
+    //
+    // This is the only part of a scan that shells out to git rather than the database or
+    // the filesystem, and — like table_stats and schema — it fails quietly: no git
+    // binary, no repository, or no commits in the window all end as an empty ranking
+    // rather than a failed scan.
+    //
+    'churn' => [
+        'enabled' => env('LARAVEL_BRAIN_CHURN', true),
+
+        // How far back `git log` looks. Bounds the cost of every scan and every watch-mode
+        // poll to a fixed window regardless of how old the repository is — a five-year-old
+        // project does not make this five times slower than a one-year-old one. Any string
+        // `git log --since` accepts (e.g. '6 months ago', '2024-01-01').
+        'since' => env('LARAVEL_BRAIN_CHURN_SINCE', '1 year ago'),
+
+        // Bytes of `git log` output to read before the rest is discarded. Sized for a whole
+        // repository's file-touch history in the window above, not a single file's diff —
+        // see GitHistoryInspector::MAX_OUTPUT_BYTES for that smaller cap.
+        'max_output_bytes' => env('LARAVEL_BRAIN_CHURN_MAX_OUTPUT_BYTES', 20_000_000),
+
+        // How many files the manifest's ranked list carries, highest risk first.
+        'limit' => env('LARAVEL_BRAIN_CHURN_LIMIT', 50),
+    ],
+
+    // -------------------------------------------------------------------------
     // Livewire Component Search Paths
     // -------------------------------------------------------------------------
     // Directories (relative to project root) that are searched when resolving

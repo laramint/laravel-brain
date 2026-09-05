@@ -1451,8 +1451,17 @@ body::before {
   flex: 1 1 50%;
   min-width: 0;
   display: flex;
-  overflow: auto;
   border-right: 1px solid var(--glass-border);
+  /* No overflow here on purpose: the <pre> the syntax highlighter renders already gets its
+     own scroll container (implied by its overflow-x: auto — per spec, an element with one
+     overflow axis not "visible" forces the other axis to "auto" too, so it independently
+     scrolls both ways). A second, competing scrollable ancestor here produced two
+     out-of-sync viewports: this element's overflow tracked one scroll position, <pre>'s
+     internal one stayed wherever it last was — so the gutter (which has no box of its own
+     and simply spilled past its height, uncropped) kept counting lines while <pre>'s
+     actually-visible content stayed frozen on whatever it was scrolled to. <pre> is the one
+     real scroll owner (SideBySideDiff's effect syncs .diff-gutter to it directly), so this
+     element must not also try to be one. */
 }
 
 .diff-pane:last-child {
@@ -1461,6 +1470,13 @@ body::before {
 
 .diff-gutter {
   flex: 0 0 auto;
+  /* Never scrolled directly by the user — JS sets scrollTop to mirror <pre>'s, every time it
+     scrolls, for any reason (a wheel event or the cross-pane sync setting it programmatically
+     both fire the same native "scroll" event <pre>'s listener reacts to). overflow-y must be
+     something other than the default "visible" for that assignment to do anything at all —
+     "visible" has no scroll position to set, so numbers just kept rendering past this
+     element's own height with nothing clipping them. */
+  overflow-y: hidden;
   padding: 0 8px;
   text-align: right;
   user-select: none;
@@ -2309,6 +2325,15 @@ body::before {
   gap: 6px;
 }
 
+/* Code Metrics always has exactly 4 short numbers, so 4 equal columns fits them well. Git
+   Activity always has exactly 2 items, one of them a 10-character date — at the same 4-column
+   width as Code Metrics, its box was too narrow for the date at 18px bold and it wrapped
+   across two lines. Two wider columns, plus a smaller font specifically for the date value
+   below, fixes it without touching Code Metrics' own sizing. */
+.metrics-grid--2col {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .metric-item {
   display: flex;
   flex-direction: column;
@@ -2332,6 +2357,11 @@ body::before {
   font-weight: 700;
   color: var(--text);
   line-height: 1;
+}
+
+.metric-value--date {
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .metric-label {
@@ -3310,6 +3340,12 @@ body::before {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   opacity: 0.85;
+  /* Falls back to this in RiskiestFilesPanel's commit-count usage, which sets no per-type
+     accent color the way ComplexityPanel's node-type usage does via inline style — without
+     an explicit color here it inherits whatever's nearest, which read as barely visible.
+     --dim is already the theme-aware color this codebase uses for exactly this kind of
+     secondary metadata text (e.g. .file-history-date, .metric-label). */
+  color: var(--dim);
 }
 
 /* ── Complexity overlay legend ── */
@@ -4205,6 +4241,16 @@ kbd, .toolbar-kbd, .stat-chip, .route-row-uri, .route-row-method,
   background: var(--panel-2);
   border-color: var(--border);
 }
+.ins-chip--link { text-decoration: none; cursor: pointer; }
+.ins-chip--link:hover { text-decoration: underline; }
+
+/* .complexity-panel's height:100% does nothing here (this sits in the left sidebar's normal
+   document flow, not a parent with a defined height), which silently defeated
+   .complexity-list's own overflow-y: auto — nothing capped its height, so all 50 default rows
+   rendered inline and pushed the route tree below them. An explicit max-height is what
+   actually makes it scroll internally instead. */
+.riskiest-files-panel { height: auto; }
+.riskiest-files-list { max-height: 240px; }
 .ins-actions { display: flex; gap: 6px; padding: 14px 16px 0; }
 .ins-action-btn {
   flex: 1;

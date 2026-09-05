@@ -12,6 +12,7 @@ use LaraMint\LaravelBrain\Mcp\Tools\GetContextTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetFileHistoryTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetGraphTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetManifestTool;
+use LaraMint\LaravelBrain\Mcp\Tools\GetRiskiestFilesTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetRouteSecurityTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetSubgraphTool;
 use LaraMint\LaravelBrain\Mcp\Tools\RescanTool;
@@ -39,6 +40,7 @@ class BrainMcpServer extends Server
         GetRouteSecurityTool::class,
         GetAgentRulesTool::class,
         GetFileHistoryTool::class,
+        GetRiskiestFilesTool::class,
     ];
 
     /**

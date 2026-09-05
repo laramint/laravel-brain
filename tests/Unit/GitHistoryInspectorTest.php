@@ -54,7 +54,8 @@ it('reads the last commit that added a new file', function () {
         ->and($result['newContent'])->toBe("<?php\n\necho 'hello';\n")
         ->and($result['newContentTruncated'])->toBeFalse()
         ->and($result['oldContent'])->toBeNull()
-        ->and($result['oldContentTruncated'])->toBeFalse();
+        ->and($result['oldContentTruncated'])->toBeFalse()
+        ->and($result['remoteCommitUrl'])->toBeNull();
 });
 
 it('shows only the incremental change on a later commit, not the whole file', function () {
@@ -136,4 +137,59 @@ it('degrades gracefully for a merge commit, whose metadata parses even when git 
         // parses cleanly rather than throwing or misaligning fields — not the exact byte
         // value, which is git's behavior to own, not this class's.
         ->and($result['diff'])->toBeString();
+});
+
+it('builds a GitHub commit URL from an https origin', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin https://github.com/acme/widgets.git');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBe("https://github.com/acme/widgets/commit/{$result['hash']}");
+});
+
+it('builds the same GitHub commit URL from an scp-like ssh origin', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin git@github.com:acme/widgets.git');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBe("https://github.com/acme/widgets/commit/{$result['hash']}");
+});
+
+it('builds a GitLab -/commit/ URL, preserving a nested subgroup, from both origin forms', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin git@gitlab.company.com:team/sub/widgets.git');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBe("https://gitlab.company.com/team/sub/widgets/-/commit/{$result['hash']}");
+});
+
+it('builds a Bitbucket commits/ URL', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin https://bitbucket.org/acme/widgets.git');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBe("https://bitbucket.org/acme/widgets/commits/{$result['hash']}");
+});
+
+it('never leaks embedded credentials from the origin URL into the commit URL', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin https://oauth2:SECRETTOKEN@gitlab.company.com/acme/widgets.git');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBe("https://gitlab.company.com/acme/widgets/-/commit/{$result['hash']}")
+        ->and($result['remoteCommitUrl'])->not->toContain('SECRETTOKEN');
+});
+
+it('returns a null remoteCommitUrl for an origin with no parseable host', function () {
+    brainGitCommit($this->root, 'foo.php', "<?php\n", 'Add foo');
+    exec('git -C '.escapeshellarg($this->root).' remote add origin not-a-url');
+
+    $result = $this->inspector->lastCommit($this->root.'/foo.php', $this->root);
+
+    expect($result['remoteCommitUrl'])->toBeNull();
 });

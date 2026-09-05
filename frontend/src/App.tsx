@@ -302,6 +302,8 @@ export default function App() {
           onComplexityFilterChange={setComplexityFilter}
           onNodeSelect={handleNodeSelect}
           selectedId={selectedId}
+          riskiestFiles={manifest.riskiestFiles}
+          theme={theme}
         />
         <div className="graph-container">
           {tabState.loading && (

@@ -38,9 +38,21 @@ export function FileHistoryView({ filePath, theme }: Props) {
   return (
     <div className="file-history">
       <div className="file-history-byline">
-        <span className="ins-chip ins-chip--neutral" title={data.hash}>
-          {data.shortHash}
-        </span>
+        {data.remoteCommitUrl ? (
+          <a
+            href={data.remoteCommitUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ins-chip ins-chip--neutral ins-chip--link"
+            title={`${data.hash} — open on remote`}
+          >
+            {data.shortHash}
+          </a>
+        ) : (
+          <span className="ins-chip ins-chip--neutral" title={data.hash}>
+            {data.shortHash}
+          </span>
+        )}
         <span className="file-history-author" title={data.authorEmail}>
           {data.authorName}
         </span>

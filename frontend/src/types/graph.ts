@@ -249,6 +249,22 @@ export interface TabEntry {
   schedule?: ScheduleInfo
 }
 
+/** One entry in Manifest.riskiestFiles — a file ranked by commit frequency x its most complex method. */
+export interface FileRiskEntry {
+  file: string
+  commitCount: number
+  lastChangedAt: string
+  maxComplexity: number
+  riskScore: number
+}
+
+/** Shape of node.data.churn when a scan found commits for that node's file within the churn window. */
+export interface NodeChurnData {
+  commitCount: number
+  lastChangedAt: string
+  lastAuthor: string
+}
+
 export interface Manifest {
   project: string
   analyzedAt: string
@@ -257,6 +273,7 @@ export interface Manifest {
   totalNodes: number
   totalEdges: number
   tabs: TabEntry[]
+  riskiestFiles?: FileRiskEntry[]
 }
 
 export interface SequenceActor {
@@ -310,6 +327,8 @@ export interface NodeUsages {
 export interface FileHistory {
   hash: string
   shortHash: string
+  /** URL to view this commit on GitHub/GitLab/Bitbucket. Null with no `origin` remote or an unparseable remote URL. */
+  remoteCommitUrl: string | null
   authorName: string
   authorEmail: string
   date: string
