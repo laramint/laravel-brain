@@ -9,6 +9,7 @@ use LaraMint\LaravelBrain\Mcp\Resources\SubgraphResource;
 use LaraMint\LaravelBrain\Mcp\Tools\FindUsagesTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetAgentRulesTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetContextTool;
+use LaraMint\LaravelBrain\Mcp\Tools\GetFileHistoryTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetGraphTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetManifestTool;
 use LaraMint\LaravelBrain\Mcp\Tools\GetRouteSecurityTool;
@@ -37,6 +38,7 @@ class BrainMcpServer extends Server
         GetGraphTool::class,
         GetRouteSecurityTool::class,
         GetAgentRulesTool::class,
+        GetFileHistoryTool::class,
     ];
 
     /**

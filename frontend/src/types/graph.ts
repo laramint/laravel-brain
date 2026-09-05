@@ -306,6 +306,24 @@ export interface NodeUsages {
   files: NodeUsageFileGroup[]
 }
 
+/** Response shape of the `history` field from `GET /api/file-history?path=...` — the last commit that touched this file. */
+export interface FileHistory {
+  hash: string
+  shortHash: string
+  authorName: string
+  authorEmail: string
+  date: string
+  subject: string
+  diff: string
+  truncated: boolean
+  /** Full file content at this commit. null only if it could not be read. */
+  newContent: string | null
+  newContentTruncated: boolean
+  /** Full file content at the previous commit. null for the file's first commit (no previous version) or if it could not be read. */
+  oldContent: string | null
+  oldContentTruncated: boolean
+}
+
 export interface StressTestConfig { method: string; url: string; count: number; concurrency: number; headers: Record<string, string>; body: string; timeout: number }
 export interface StressTestTiming { min: number; max: number; avg: number; p50: number; p95: number; p99: number }
 export interface StressTestResult { total: number; succeeded: number; failed: number; successRate: number; errorRate: number; throughput: number; timing: StressTestTiming; statusDistribution: Record<string, number>; errors: string[]; wallTimeMs: number }

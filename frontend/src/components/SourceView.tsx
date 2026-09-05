@@ -4,6 +4,7 @@ import php from 'react-syntax-highlighter/dist/esm/languages/hljs/php'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import atomOneLight from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-light'
 import { useFileSource } from '../hooks/useFileSource'
+import { FileHistoryView } from './FileHistoryView'
 
 SyntaxHighlighter.registerLanguage('php', php)
 
@@ -50,6 +51,7 @@ export function SourceView({ filePath, highlightLine, theme }: Props) {
   return (
     <div className="source-view">
       <div className="source-path" title={filePath}>{shortPath}</div>
+      <FileHistoryView filePath={filePath} theme={theme} />
       <SyntaxHighlighter
         language="php"
         style={style}

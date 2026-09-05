@@ -11,6 +11,7 @@ use Illuminate\Routing\Controller;
 use LaraMint\LaravelBrain\Ai\ContextExporter;
 use LaraMint\LaravelBrain\Ai\RulesExporter;
 use LaraMint\LaravelBrain\Ai\UsageFinder;
+use LaraMint\LaravelBrain\Analysis\GitHistoryInspector;
 use LaraMint\LaravelBrain\Analysis\ProjectAnalyzer;
 use LaraMint\LaravelBrain\Analysis\RouteAnalyzer;
 use LaraMint\LaravelBrain\Storage\GraphStoreFactory;
@@ -42,6 +43,26 @@ class BrainController extends Controller
         $root = realpath($projectRoot);
 
         return $root !== false && str_starts_with($realPath, $root.DIRECTORY_SEPARATOR);
+    }
+
+    // ── File history ──────────────────────────────────────────────────────────
+
+    /**
+     * Who last committed this file, and the diff that commit introduced — read from git,
+     * not from the scan, so it is always as current as the working tree.
+     */
+    public function fileHistory(Request $request): JsonResponse
+    {
+        $filePath = $request->query('path', '');
+        $real = $filePath ? realpath($filePath) : false;
+
+        if (! $real || ! is_file($real) || pathinfo($real, PATHINFO_EXTENSION) !== 'php' || ! self::isWithinProjectRoot($real, base_path())) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+
+        $history = (new GitHistoryInspector)->lastCommit($real, base_path());
+
+        return response()->json(['history' => $history]);
     }
 
     // ── Scan ──────────────────────────────────────────────────────────────────

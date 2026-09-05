@@ -6,6 +6,7 @@ use LaraMint\LaravelBrain\Http\Middleware\EnsureRequestIsSameOrigin;
 
 Route::prefix('_laravel-brain')->group(function () {
     Route::get('/api/source', [BrainController::class, 'source']);
+    Route::get('/api/file-history', [BrainController::class, 'fileHistory']);
     Route::post('/api/scan', [BrainController::class, 'scan'])->middleware(EnsureRequestIsSameOrigin::class);
     Route::post('/api/stress-test', [BrainController::class, 'stressTest'])->middleware(EnsureRequestIsSameOrigin::class);
     Route::get('/api/stress-test/{jobId}', [BrainController::class, 'stressTestPoll']);

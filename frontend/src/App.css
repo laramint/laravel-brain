@@ -1378,6 +1378,118 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.file-history {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.file-history--loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-history--empty {
+  opacity: 0.7;
+}
+
+.file-history-byline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-history-author {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.file-history-date {
+  white-space: nowrap;
+}
+
+.file-history-subject {
+  flex: 1 1 auto;
+  min-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.file-history-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--dim);
+  font-size: 10px;
+  padding: 2px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-history-toggle:hover {
+  color: var(--text);
+  border-color: var(--cc);
+}
+
+/* ── Side-by-side diff modal ───────────────────── */
+.diff-modal-body {
+  background: var(--bg);
+  padding: 0;
+}
+
+.diff-side-by-side {
+  display: flex;
+  height: calc(90vh - 100px);
+}
+
+.diff-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  overflow: auto;
+  border-right: 1px solid var(--glass-border);
+}
+
+.diff-pane:last-child {
+  border-right: none;
+}
+
+.diff-gutter {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  text-align: right;
+  user-select: none;
+  color: var(--dim);
+  font-size: 12px;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  line-height: 1.6;
+  background: rgba(0,0,0,0.15);
+}
+
+.diff-gutter-line {
+  min-width: 2em;
+  opacity: 0.5;
+}
+
+.diff-gutter-line--add {
+  background: rgba(76,175,80,0.18);
+  opacity: 0.9;
+}
+
+.diff-gutter-line--remove {
+  background: rgba(244,67,54,0.18);
+  opacity: 0.9;
+}
+
+.diff-gutter-line--empty {
+  background: rgba(0,0,0,0.08);
+}
+
 .source-code {
   overflow: auto;
   max-height: 360px;
