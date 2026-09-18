@@ -524,7 +524,7 @@ class ModelAnalyzer
                     continue;
                 }
                 // Treat as a glob pattern (e.g. app/Domain/*/Models)
-                foreach (glob($abs, GLOB_ONLYDIR | GLOB_BRACE) ?: [] as $match) {
+                foreach (SourceDirectories::globDirectories($abs) as $match) {
                     $dirs[] = $match;
                 }
             }

@@ -189,7 +189,7 @@ class FilamentAnalyzer
                 continue;
             }
 
-            foreach (glob($absolute, GLOB_ONLYDIR | GLOB_BRACE) ?: [] as $match) {
+            foreach (SourceDirectories::globDirectories($absolute) as $match) {
                 $dirs[] = $match;
             }
         }

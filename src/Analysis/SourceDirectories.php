@@ -48,6 +48,33 @@ final class SourceDirectories
     }
 
     /**
+     * `glob()` for directories, with brace expansion wherever the platform offers it.
+     *
+     * The guard is the whole point of this method existing. On PHP 8.4 and older `GLOB_BRACE` is
+     * re-exported from the platform's own `glob.h`, and musl does not define it — so on Alpine the
+     * userland constant is absent and naming it is a fatal error rather than an ignored flag
+     * (issue #139). PHP 8.5 bundles its own glob and defines it everywhere.
+     *
+     * `GLOB_ONLYDIR` needs no guard even though musl omits that too: PHP has emulated it in
+     * `main/streams/glob_wrapper.c` for years, which is why the crash names `GLOB_BRACE` and not
+     * the left-hand operand.
+     *
+     * Where the constant is missing a brace pattern matches nothing instead of erroring. Wildcards
+     * are unaffected, and no shipped default uses braces — the modular-monolith example is
+     * `app-modules/*\/src`.
+     *
+     * Every `glob()` for directories in this package goes through here, so the flag is written
+     * once. It was written four times before, which is how one missing constant became four
+     * crashes.
+     *
+     * @return list<string> absolute paths
+     */
+    public static function globDirectories(string $pattern): array
+    {
+        return glob($pattern, GLOB_ONLYDIR | (defined('GLOB_BRACE') ? GLOB_BRACE : 0)) ?: [];
+    }
+
+    /**
      * @param  string[]  $patterns  paths or glob patterns, relative to the project root
      * @return string[] existing directories, relative to the project root
      */
@@ -76,7 +103,7 @@ final class SourceDirectories
                 continue;
             }
 
-            foreach (glob($absolute, GLOB_ONLYDIR | GLOB_BRACE) ?: [] as $match) {
+            foreach (self::globDirectories($absolute) as $match) {
                 $directories[] = ltrim(substr($match, strlen($root)), '/');
             }
         }

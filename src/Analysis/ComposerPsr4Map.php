@@ -134,7 +134,7 @@ class ComposerPsr4Map
             }
 
             $absolute = str_starts_with($url, '/') ? $url : $root.'/'.$url;
-            $directories = is_dir($absolute) ? [$absolute] : (glob($absolute, GLOB_ONLYDIR | GLOB_BRACE) ?: []);
+            $directories = is_dir($absolute) ? [$absolute] : SourceDirectories::globDirectories($absolute);
 
             foreach ($directories as $directory) {
                 self::mergeComposerFile($map, rtrim($directory, '/').'/composer.json', rtrim($directory, '/'));
