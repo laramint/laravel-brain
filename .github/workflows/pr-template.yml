@@ -23,7 +23,7 @@ jobs:
             const body = context.payload.pull_request.body || '';
 
             const section = (start, end) => {
-              const expression = new RegExp(`^## ${start}\\s*$([\\s\\S]*?)(?=^## ${end}\\s*$|$)`, 'mi');
+              const expression = new RegExp(`^#{2,3} ${start}\\s*$([\\s\\S]*?)(?=^#{2,3} ${end}\\s*$|$(?![\\s\\S]))`, 'mi');
               return (body.match(expression)?.[1] || '')
                 .replace(/<!--[\s\S]*?-->/g, '')
                 .trim();
