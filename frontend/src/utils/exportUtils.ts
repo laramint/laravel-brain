@@ -128,32 +128,29 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
   const entryId = nextId()
   lines.push(`  ${entryId}([" 🚀 ${escapeLabel(methodLabel)} "])`)
 
-  const processSteps = (stepsArr: FlowStep[], parentId: string): string => {
+  // A branch is drawn like any other list of steps. Only the edge into its first step carries a
+  // label ("yes" / "no"); drawing that first step separately lost its children and its markers.
+  const processSteps = (stepsArr: FlowStep[], parentId: string, firstEdgeLabel?: string): string => {
     let prevId = parentId
+    let edgeLabel = firstEdgeLabel
+    const link = (id: string) => {
+      lines.push(edgeLabel ? `  ${prevId} -->|"${edgeLabel}"| ${id}` : `  ${prevId} --> ${id}`)
+      edgeLabel = undefined
+    }
     for (const step of stepsArr) {
       const id = nextId()
 
       if (step.type === 'if') {
         const [open, close] = ['{', '}']
         lines.push(`  ${id}${open}"${escapeLabel(step.label)}"${close}`)
-        lines.push(`  ${prevId} --> ${id}`)
+        link(id)
         lines.push(`  class ${id} cls_if`)
 
         if (step.then && step.then.length > 0) {
-          const thenFirst = nextId()
-          const thenLabel = step.then[0]
-          lines.push(`  ${thenFirst}${stepShape(thenLabel.type)}"${escapeLabel(thenLabel.label)}"${stepShapeClose(thenLabel.type)}`)
-          lines.push(`  ${id} -->|"yes"| ${thenFirst}`)
-          lines.push(`  class ${thenFirst} cls_${thenLabel.type}`)
-          processSteps(step.then.slice(1), thenFirst)
+          processSteps(step.then, id, 'yes')
         }
         if (step.else && step.else.length > 0) {
-          const elseFirst = nextId()
-          const elseLabel = step.else[0]
-          lines.push(`  ${elseFirst}${stepShape(elseLabel.type)}"${escapeLabel(elseLabel.label)}"${stepShapeClose(elseLabel.type)}`)
-          lines.push(`  ${id} -->|"no"| ${elseFirst}`)
-          lines.push(`  class ${elseFirst} cls_${elseLabel.type}`)
-          processSteps(step.else.slice(1), elseFirst)
+          processSteps(step.else, id, 'no')
         }
 
         prevId = id
@@ -163,7 +160,7 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
         // closure; without this it would export as an unlabelled block of work.
         const cacheLabel = step.cache ? ` [cache ${step.cache.kind}] ` : ''
         lines.push(`  ${id}[/"${n1Label}${cacheLabel}${escapeLabel(step.label)}"/]`)
-        lines.push(`  ${prevId} --> ${id}`)
+        link(id)
         lines.push(`  class ${id} ${step.n1 ? 'cls_n1' : step.cache ? 'cls_cache' : 'cls_loop'}`)
         if (step.body && step.body.length > 0) {
           processSteps(step.body, id)
@@ -177,7 +174,7 @@ export function flowStepsToMermaid(steps: FlowStep[], methodLabel: string): stri
         // or the exported chart loses what the panel showed.
         const cacheLabel = step.cache ? ` [cache ${step.cache.kind}] ` : ''
         lines.push(`  ${id}${open}"${n1Label}${cacheLabel}${icon}${escapeLabel(step.label)}"${close}`)
-        lines.push(`  ${prevId} --> ${id}`)
+        link(id)
         lines.push(`  class ${id} ${step.n1 ? 'cls_n1' : `cls_${step.type}`}`)
         prevId = id
       }
