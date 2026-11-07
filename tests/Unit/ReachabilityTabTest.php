@@ -151,6 +151,25 @@ it('reports a real project end to end', function () {
         ->and($result->subgraphs)->toHaveKey('reachability--inventory');
 });
 
+it('reaches what a scheduled closure calls when its cadence takes arguments', function () {
+    // The tracer hangs a scheduled closure's calls on the schedule's node id, and that id hashes
+    // the cadence arguments too. A seed built without them pointed at no node, so everything a
+    // `dailyAt('05:30')` closure called was reported as unreached.
+    bootBrainConfig(['reachability' => ['enabled' => true]]);
+
+    $result = (new ProjectAnalyzer)->analyze(fixture('scheduled-closure-reachability-project'), function () {});
+
+    $unreached = array_map(fn (UnreachedClass $class): string => $class->fqcn, $result->reachability->unreached);
+    $schedules = array_values(array_map(
+        fn (EntryPoint $entryPoint): string => $entryPoint->label,
+        array_filter($result->reachability->entryPoints, fn (EntryPoint $e): bool => $e->kind === EntryPoint::KIND_SCHEDULE),
+    ));
+
+    expect($unreached)->toBe(['App\Services\UnusedCleanup'])
+        // Labelled with the same cadence text as the graph's schedule node, arguments included.
+        ->and($schedules)->toBe(['Closure (dailyAt 05:30)', 'Closure (hourly)']);
+});
+
 it('builds no reachability tab when the feature is switched off', function () {
     bootBrainConfig(['reachability' => ['enabled' => false]]);
 

@@ -93,7 +93,7 @@ it('gives routes, commands, channels and schedule entries the node id the graph 
     $entryPoints = EntryPointInventory::collect(
         routes: [new RouteDefinition('POST', '/orders', '', '', [], '', '/routes/web.php', 1)],
         commands: [new ConsoleCommandDefinition('orders:sync', '', '', '/routes/console.php', 'route')],
-        schedules: [new ScheduleEntry('command', 'orders:sync', 'daily', '/routes/console.php')],
+        schedules: [new ScheduleEntry('command', 'orders:sync', 'dailyAt', '/routes/console.php', ['05:30'])],
         channels: [new ChannelDefinition('orders.{id}', '', '/routes/channels.php')],
     );
 
@@ -105,7 +105,7 @@ it('gives routes, commands, channels and schedule entries the node id the graph 
     expect($ids)->toBe([
         EntryPoint::KIND_ROUTE => ['route::POST::/orders'],
         EntryPoint::KIND_COMMAND => ['command::orders:sync'],
-        EntryPoint::KIND_SCHEDULE => ['schedule::'.md5('command'.'orders:sync'.'daily')],
+        EntryPoint::KIND_SCHEDULE => ['schedule::'.md5('command'.'orders:sync'.'dailyAt'.'05:30')],
         EntryPoint::KIND_CHANNEL => ['channel::'.md5('orders.{id}')],
     ]);
 });

@@ -80,14 +80,16 @@ final class EntryPointInventory
         foreach ($schedules as $schedule) {
             $entryPoints[] = new EntryPoint(
                 kind: EntryPoint::KIND_SCHEDULE,
-                label: $schedule->frequency !== ''
-                    ? "{$schedule->target} ({$schedule->frequency})"
+                // The same cadence text the graph's own schedule node shows, so two runs of one
+                // command at 05:00 and 17:00 are two different rows.
+                label: $schedule->cadence() !== ''
+                    ? "{$schedule->target} ({$schedule->cadence()})"
                     : $schedule->target,
                 // A `->job(Foo::class)` entry names a class; a `->command()` one names a
                 // signature, and the command it points at is already its own entry point.
                 fqcn: $schedule->type === 'job' ? $schedule->target : '',
                 file: $schedule->file,
-                nodeIds: ['schedule::'.md5($schedule->type.$schedule->target.$schedule->frequency)],
+                nodeIds: [$schedule->nodeId()],
                 detail: $schedule->type,
             );
         }
