@@ -19,6 +19,7 @@ import {
   REGION_FRAME,
   REGION_DASH,
   REGION_LABEL_LINE,
+  isNodeTypeShown,
 } from '../utils/graphConstants'
 import {
   graphRegions,
@@ -396,7 +397,7 @@ export function GraphView({
   const { nodes: baseNodes, edges: baseEdges } = useMemo(() => partitionElements(elements, compact), [elements, compact])
 
   const visibleNodeCount = useMemo(
-    () => baseNodes.filter((n) => visibleTypes.has(String(n.data.type))).length,
+    () => baseNodes.filter((n) => isNodeTypeShown(n.data.type, visibleTypes)).length,
     [baseNodes, visibleTypes],
   )
 
@@ -561,7 +562,7 @@ export function GraphView({
   const effectiveNodeByIdRef = useRef(effectiveNodeById)
   useEffect(() => { effectiveNodeByIdRef.current = effectiveNodeById }, [effectiveNodeById])
 
-  const isTypeVisible = useCallback((type: unknown) => visibleTypes.has(String(type)), [visibleTypes])
+  const isTypeVisible = useCallback((type: unknown) => isNodeTypeShown(type, visibleTypes), [visibleTypes])
 
   const edgeVisible = useCallback(
     (e: LayoutEdge) =>

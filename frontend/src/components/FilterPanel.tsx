@@ -1,5 +1,5 @@
 import type { GraphNode } from '../types/graph'
-import { ACCENT_COLORS, REGION_FRAME } from '../utils/graphConstants'
+import { ACCENT_COLORS, NODE_TYPES, REGION_FRAME } from '../utils/graphConstants'
 import { Tooltip } from './Tooltip'
 
 const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
@@ -30,6 +30,10 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   abstract_class: 'Abstract',
   service_provider: 'Providers',
   facade: 'Facades',
+  observer: 'Observers',
+  policy: 'Policies',
+  resource: 'API resources',
+  repository: 'Repositories',
   ai_agent: 'AI Agents',
   ai_tool: 'AI Tools',
   filament_panel: 'F. Panels',
@@ -45,18 +49,6 @@ const TYPE_LABELS: Partial<Record<GraphNode['type'], string>> = {
   macro: 'Macros',
   macro_group: 'Macro receivers',
 }
-
-// Stable order matching App.tsx ALL_TYPES
-const ORDER: GraphNode['type'][] = [
-  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service',
-  'validation_request', 'model', 'event', 'listener', 'job', 'command', 'channel', 'schedule',
-  'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class',
-  'service_provider', 'facade', 'ai_agent', 'ai_tool',
-  'filament_panel', 'filament_resource', 'filament_page',
-  'filament_page_method', 'filament_widget', 'filament_relation_manager',
-  'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
-  'macro', 'macro_group',
-]
 
 /**
  * Listed last, and not node types.
@@ -83,7 +75,7 @@ interface Props {
 }
 
 export function FilterPanel({ visibleTypes, counts, onToggle, onShowAll, onHideAll }: Props) {
-  const present: string[] = ORDER.filter((t) => (counts[t] ?? 0) > 0)
+  const present: string[] = NODE_TYPES.filter((t) => (counts[t] ?? 0) > 0)
   const regions = new Map(REGION_TYPES.map((region) => [region.type, region]))
 
   for (const region of REGION_TYPES) {

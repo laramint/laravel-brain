@@ -1,3 +1,5 @@
+import type { GraphNode } from '../types/graph'
+
 /**
  * The frame drawn around work that runs inside a database transaction, and around the path that
  * runs only after one rolled back.
@@ -54,6 +56,44 @@ export const REGION_LABEL_LINE = 11
 export const LARGE_GRAPH_THRESHOLD = 80
 export const PACKET_ANIMATION_THRESHOLD = 40
 
+/**
+ * Every node type the "Show on graph" filter has a row for, in the order the rows appear.
+ *
+ * The filter starts with all of these switched on, and a type outside the list gets no row. That
+ * pair is how `observer`, `policy`, `resource` and `repository` nodes ended up drawn at opacity 0
+ * with their edges dropped: the builder emits them, and nothing on this side named them. `facade`
+ * had a row but was missing from the default selection, so it started switched off. Keep one
+ * list, here, so the filter's rows and its default selection cannot disagree, and see
+ * `isNodeTypeShown` for the next type that is added on the PHP side only.
+ */
+export const NODE_TYPES: readonly GraphNode['type'][] = [
+  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service',
+  'repository', 'validation_request', 'model', 'observer', 'policy', 'event', 'listener', 'job',
+  'command', 'channel', 'schedule', 'view', 'mail', 'notification', 'resource', 'enum',
+  'interface', 'trait', 'abstract_class', 'service_provider', 'facade', 'ai_agent', 'ai_tool',
+  'filament_panel', 'filament_resource', 'filament_page',
+  'filament_page_method', 'filament_widget', 'filament_relation_manager',
+  // The inventory's own kinds, listed so each gets a filter row. Switching one off hides its
+  // edges too, so folding a group then finds no children to fold.
+  'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
+  'macro', 'macro_group',
+]
+
+const FILTERABLE_NODE_TYPES: ReadonlySet<string> = new Set(NODE_TYPES)
+
+/**
+ * Whether a node of this type is drawn, given the types the filter has switched on.
+ *
+ * A type with no filter row is always drawn: hiding it would leave the reader no way to bring it
+ * back. A missing colour only falls back to the default; a missing row used to hide the node.
+ */
+export function isNodeTypeShown(type: unknown, visibleTypes: ReadonlySet<string>): boolean {
+  // No type at all, as for an edge whose endpoint is not in the tab, stays hidden as before.
+  if (typeof type !== 'string') return false
+
+  return visibleTypes.has(type) || !FILTERABLE_NODE_TYPES.has(type)
+}
+
 export const ACCENT_COLORS: Record<string, string> = {
   // Amber: a macro is a method that is there without being written down, and the palette says
   // 'look again' rather than 'something is wrong'.
@@ -83,6 +123,10 @@ export const ACCENT_COLORS: Record<string, string> = {
   abstract_class: '#94a3b8',
   service_provider: '#ca8a04',
   facade:     '#00BCD4',
+  observer:   '#F87171',
+  policy:     '#10B981',
+  resource:   '#6366F1',
+  repository: '#7E57C2',
   ai_agent:   '#A3E635',
   ai_tool:    '#65A30D',
   filament_panel:            '#7C3AED',
@@ -127,6 +171,10 @@ export const ACCENT_COLORS_LIGHT: Record<string, string> = {
   abstract_class: '#64748b',
   service_provider: '#a16207',
   facade:     '#00838f',
+  observer:   '#9f1239',
+  policy:     '#047857',
+  resource:   '#4338ca',
+  repository: '#5e35b1',
   ai_agent:   '#4d7c0f',
   ai_tool:    '#3f6212',
   filament_panel:            '#5b21b6',
@@ -167,6 +215,10 @@ export const BG_COLORS: Record<string, string> = {
   abstract_class: '#0f172a',
   service_provider: '#422006',
   facade:     '#001F28',
+  observer:   '#1C0A0A',
+  policy:     '#05170F',
+  resource:   '#0B0C1F',
+  repository: '#120C1C',
   ai_agent:   '#131A08',
   ai_tool:    '#101705',
   filament_panel:            '#150C2A',
@@ -207,6 +259,10 @@ export const BG_COLORS_LIGHT: Record<string, string> = {
   abstract_class: '#f1f5f9',
   service_provider: '#fef9c3',
   facade:     '#e0f7fa',
+  observer:   '#fef2f2',
+  policy:     '#ecfdf5',
+  resource:   '#eef2ff',
+  repository: '#f3effa',
   ai_agent:   '#f7fee7',
   ai_tool:    '#ecfccb',
   filament_panel:            '#f5f3ff',

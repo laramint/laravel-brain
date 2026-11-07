@@ -8,24 +8,11 @@ import { GraphView } from './components/GraphView'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { LeftSidebar } from './components/LeftSidebar'
-import type { GraphNode, TabEntry } from './types/graph'
+import type { TabEntry } from './types/graph'
+import { NODE_TYPES, isNodeTypeShown } from './utils/graphConstants'
 import { Tooltip } from './components/Tooltip'
 import { membershipsOf } from './utils/graphRegions'
 import './App.css'
-
-const ALL_TYPES: GraphNode['type'][] = [
-  'route', 'middleware', 'controller', 'livewire_component', 'action', 'action_class', 'service', 'validation_request', 'model', 'event', 'listener', 'job',
-  'command', 'channel', 'schedule',
-  'view', 'mail', 'notification', 'enum', 'interface', 'trait', 'abstract_class', 'service_provider',
-  'ai_agent', 'ai_tool',
-  'filament_panel', 'filament_resource', 'filament_page', 'filament_page_method', 'filament_widget', 'filament_relation_manager',
-  // The inventory's own kinds. Membership here is what makes a type filterable at all, and
-  // `edgeVisible` reads it too — a type left out has no visible edges, so folding a group
-  // finds no children to fold.
-  'entry_point', 'entry_point_group', 'unreached_class', 'unreached_group',
-  // Membership here is what makes a type filterable at all, and edgeVisible reads it too.
-  'macro', 'macro_group',
-]
 
 /**
  * Everything the footer can switch off, including the entries that are not node types.
@@ -37,7 +24,7 @@ const ALL_TYPES: GraphNode['type'][] = [
  * it, because a compensation path shown while the transaction it compensates is hidden is a
  * region with nothing to be the compensation for.
  */
-const ALL_TOGGLEABLE: string[] = [...ALL_TYPES, 'transaction', 'chain', 'batch']
+const ALL_TOGGLEABLE: string[] = [...NODE_TYPES, 'transaction', 'chain', 'batch']
 
 // Node types that should have their methods expanded on first click
 
@@ -176,7 +163,7 @@ export default function App() {
 
   const visibleNodeCount = useMemo(() => {
     if (!tabState.data) return 0
-    return tabState.data.nodes.filter((n) => visibleTypes.has(n.type)).length
+    return tabState.data.nodes.filter((n) => isNodeTypeShown(n.type, visibleTypes)).length
   }, [tabState.data, visibleTypes])
 
   const toggleType = useCallback((type: string) => {
