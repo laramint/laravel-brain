@@ -8,6 +8,7 @@ use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use LaraMint\LaravelBrain\Analysis\ProjectAnalyzer;
 use LaraMint\LaravelBrain\Storage\GraphStoreFactory;
+use LaraMint\LaravelBrain\Storage\ScanPublisher;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -40,15 +41,7 @@ class RescanTool extends Tool
             //
         });
 
-        $store = GraphStoreFactory::make();
-        $store->ensureSchema();
-        $store->putManifest($result->manifestJson);
-
-        foreach ($result->subgraphs as $tabId => $subgraph) {
-            $store->putSubgraph((string) $tabId, $subgraph->toJson());
-        }
-
-        $store->pruneSubgraphsExcept(array_map('strval', array_keys($result->subgraphs)));
+        ScanPublisher::publish(GraphStoreFactory::make(), $result->manifestJson, $result->subgraphs);
 
         return Response::structured([
             'project' => $result->projectName,
