@@ -16,9 +16,9 @@ interface Props {
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'QUERY'])
 // Whether the panel offers the CSRF checkbox at all. QUERY is offered because whether it needs a
 // token depends on the app's Laravel version: `PreventRequestForgery::isReading()` treats it as a
-// read only from the 14.x line (laravel/framework#60655), so on 9 through 13 — where a QUERY route
-// can only be registered via `Route::match(['query'], …)` — the token is still required. Offering
-// an opt-in checkbox is correct on both; withholding it would make the route untestable on one.
+// read only from the 14.x line (laravel/framework#60655), so on 9 through 13 the token is still
+// required, even though 13.35 added `Route::query()`. Offering an opt-in checkbox is correct on
+// both; withholding it would make the route untestable on one.
 // OPTIONS is exempt on every version.
 const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'QUERY'])
 

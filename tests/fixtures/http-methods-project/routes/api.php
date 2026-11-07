@@ -3,8 +3,8 @@
 use App\Http\Controllers\SearchController;
 use Illuminate\Support\Facades\Route;
 
-// The dedicated helpers. `options` has always existed; `query` only exists from the 14.x line
-// (laravel/framework#60655), and is written here to prove the analyzer reads it out of source
+// The dedicated helpers. `options` has always existed; `query` only exists from Laravel 13.35
+// (laravel/framework#61797), and is written here to prove the analyzer reads it out of source
 // without the installed framework needing to be able to register it.
 Route::options('/preflight', [SearchController::class, 'preflight']);
 Route::query('/search', [SearchController::class, 'search']);

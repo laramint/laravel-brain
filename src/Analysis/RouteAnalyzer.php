@@ -38,11 +38,11 @@ class RouteAnalyzer
      * so `Route::options()` routes were invisible to the method filter.
      *
      * QUERY (RFC 9110bis; a safe, idempotent method that carries its query in the request body)
-     * is here even though no released Laravel registers it: `Route::query()` and the QUERY entry
-     * in `Router::$verbs` were merged in laravel/framework#60655, which went to `master` — the
-     * 14.x line — not to 13.x. On 9 through 13 the only spelling is `Route::match(['query'], …)`,
-     * which the visitor below handles alongside the helper. Reading a verb out of source costs
-     * nothing on a version that cannot register it, and an app that upgrades needs no change here.
+     * is here although most supported versions cannot register it: `Route::query()` and the QUERY
+     * entry in `Router::$verbs` arrived in Laravel 13.35 (laravel/framework#61797). Before that the
+     * only spelling is `Route::match(['query'], …)`, which the visitor below handles alongside the
+     * helper. Reading a verb out of source costs nothing on a version that cannot register it, and
+     * an app that upgrades needs no change here.
      */
     public const HTTP_VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'QUERY'];
 
@@ -998,8 +998,8 @@ class RouteAnalyzer
      * application is running rather than assumed.
      *
      * `any()` registers `Router::$verbs` verbatim, and that list is not fixed across the versions
-     * this package supports: 9 through 13 hold GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, while
-     * the 14.x line adds QUERY (laravel/framework#60655). Hard-coding either list is wrong on the
+     * this package supports: 9 through 13.34 hold GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, while
+     * 13.35 and later add QUERY (laravel/framework#61797). Hard-coding either list is wrong on the
      * other half of the matrix — it would either drop a real QUERY endpoint or invent one the app
      * cannot serve. The property is read through reflection for the reason
      * {@see RelationAutoloading} gives: a literal `method_exists`/direct read is decided at
@@ -1037,7 +1037,7 @@ class RouteAnalyzer
 
         if ($verbs === []) {
             // The list every supported version shares. Never QUERY: guessing it present would put
-            // an endpoint in the graph that a 13-and-below app answers with 405.
+            // an endpoint in the graph that an app before 13.35 answers with 405.
             $verbs = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
         }
 
