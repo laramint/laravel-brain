@@ -46,9 +46,12 @@ export default function App() {
   const { manifest, loading: manifestLoading, error: manifestError } = useManifest()
   const { state: tabState, elements: allElements, load } = useTabGraph()
   const elements = useVirtualGraph(allElements)
+  const tabData = tabState.status === 'ready' ? tabState.data : null
+  const tabLoading = tabState.status === 'loading'
+  const tabError = tabState.status === 'error' ? tabState.error : null
 
   const [activeTab, setActiveTab] = useState<TabEntry | null>(null)
-  const [loadingTabId, setLoadingTabId] = useState<string | null>(null)
+  const loadingTabId = tabLoading ? activeTab?.id ?? null : null
   const [layout, setLayout] = useState('dagre')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sidebarMode, setSidebarMode] = useState<'routes' | 'risks' | 'recent'>('routes')
@@ -60,12 +63,14 @@ export default function App() {
   const [stressRunKey, setStressRunKey] = useState(0)
   const graphRef = useRef<GraphViewportRef | null>(null)
 
-  const handleSelectTab = useCallback((tab: TabEntry) => {
-    if (activeTab?.id === tab.id) return
-    
-    // Update URL if different
+  // Every way of opening a tab comes through here: a sidebar click, the URL on first load, and
+  // back/forward. Only a click adds a history entry; back/forward has already moved the URL.
+  const handleSelectTab = useCallback((tab: TabEntry, pushHistory = true) => {
+    // Picking the open tab again does nothing, unless its load failed: then it is a retry.
+    if (activeTab?.id === tab.id && tabState.status !== 'error') return
+
     const url = new URL(window.location.href)
-    if (url.searchParams.get('tab') !== tab.id) {
+    if (pushHistory && url.searchParams.get('tab') !== tab.id) {
       url.searchParams.set('tab', tab.id)
       window.history.pushState({ tabId: tab.id }, '', url.toString())
     }
@@ -74,7 +79,7 @@ export default function App() {
     setSearchQuery('')
     setPendingRouteSelect(true)
     load(tab.file)
-  }, [activeTab, load])
+  }, [activeTab, tabState.status, load])
 
   // Auto-select tab ONLY if tab ID is present in URL
   const [prevManifest, setPrevManifest] = useState(manifest)
@@ -91,16 +96,16 @@ export default function App() {
   }
 
   // Adjust state during render when tab data changes (avoids Effect cascading render)
-  const [prevTabData, setPrevTabData] = useState(tabState.data)
-  if (tabState.data !== prevTabData) {
-    setPrevTabData(tabState.data)
-    if (tabState.data) {
+  const [prevTabData, setPrevTabData] = useState(tabData)
+  if (tabData !== prevTabData) {
+    setPrevTabData(tabData)
+    if (tabData) {
       setVisibleTypes(new Set(ALL_TOGGLEABLE))
       // When the load came from picking a route/risk/recent card, focus its
       // route node so the graph + inspector jump to it.
       if (pendingRouteSelect) {
         setPendingRouteSelect(false)
-        const routeNode = tabState.data.nodes.find((n) => n.type === 'route')
+        const routeNode = tabData.nodes.find((n) => n.type === 'route')
         setSelectedId(routeNode ? routeNode.id : null)
       } else {
         setSelectedId(null)
@@ -118,27 +123,17 @@ export default function App() {
       const tabId = params.get('tab')
       const tab = manifest.tabs.find((t) => t.id === tabId)
       if (tab) {
-        setActiveTab(tab)
-        load(tab.file)
+        handleSelectTab(tab, false)
       }
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [manifest, load])
+  }, [manifest, handleSelectTab])
 
   // Node click: select
   const handleNodeSelect = useCallback((id: string | null) => {
     setSelectedId(id)
   }, [])
-
-  // Adjust loading state during render
-  const [prevTabLoading, setPrevTabLoading] = useState(tabState.loading)
-  if (tabState.loading !== prevTabLoading) {
-    setPrevTabLoading(tabState.loading)
-    if (!tabState.loading) {
-      setLoadingTabId(null)
-    }
-  }
 
   const routeTabs = useMemo(() => manifest?.tabs ?? [], [manifest])
 
@@ -148,9 +143,9 @@ export default function App() {
   )
 
   const typeCounts = useMemo(() => {
-    if (!tabState.data) return {} as Record<string, number>
+    if (!tabData) return {} as Record<string, number>
 
-    const counts = tabState.data.nodes.reduce<Record<string, number>>((acc, n) => {
+    const counts = tabData.nodes.reduce<Record<string, number>>((acc, n) => {
       acc[n.type] = (acc[n.type] ?? 0) + 1
       return acc
     }, {})
@@ -160,7 +155,7 @@ export default function App() {
     // from the reader's side it is the same question — is this on the graph or not.
     const seen: Record<string, Set<string>> = {}
 
-    for (const node of tabState.data.nodes) {
+    for (const node of tabData.nodes) {
       for (const membership of membershipsOf(node)) {
         // Counted under the toggle that switches it, so the number the footer shows is the
         // number of regions that row turns off — a rollback is part of its transaction's span.
@@ -172,12 +167,12 @@ export default function App() {
     for (const [kind, ids] of Object.entries(seen)) counts[kind] = ids.size
 
     return counts
-  }, [tabState.data])
+  }, [tabData])
 
   const visibleNodeCount = useMemo(() => {
-    if (!tabState.data) return 0
-    return tabState.data.nodes.filter((n) => visibleTypes.has(n.type)).length
-  }, [tabState.data, visibleTypes])
+    if (!tabData) return 0
+    return tabData.nodes.filter((n) => visibleTypes.has(n.type)).length
+  }, [tabData, visibleTypes])
 
   const toggleType = useCallback((type: string) => {
     setVisibleTypes((prev) => {
@@ -270,11 +265,11 @@ export default function App() {
   return (
     <div className="app">
       <Toolbar
-        nodeCount={tabState.data?.meta.nodeCount ?? activeTab?.nodeCount ?? 0}
-        edgeCount={tabState.data?.meta.edgeCount ?? activeTab?.edgeCount ?? 0}
+        nodeCount={tabData?.meta.nodeCount ?? activeTab?.nodeCount ?? 0}
+        edgeCount={tabData?.meta.edgeCount ?? activeTab?.edgeCount ?? 0}
         visibleCount={visibleNodeCount}
         activeTabLabel={activeTab?.label ?? 'graph'}
-        graphData={tabState.data ?? null}
+        graphData={tabData}
         analyzedAt={manifest.analyzedAt}
         highRiskCount={highRiskCount}
         onOpenRisks={() => setSidebarMode('risks')}
@@ -297,7 +292,7 @@ export default function App() {
           onToggle={toggleType}
           onShowAll={onShowAll}
           onHideAll={onHideAll}
-          graphData={tabState.data ?? null}
+          graphData={tabData}
           complexityFilter={complexityFilter}
           onComplexityFilterChange={setComplexityFilter}
           onNodeSelect={handleNodeSelect}
@@ -306,18 +301,18 @@ export default function App() {
           theme={theme}
         />
         <div className="graph-container">
-          {tabState.loading && (
+          {tabLoading && (
             <div className="graph-loading-overlay">
               <div className="loading-spinner" />
               <p>Loading {activeTab?.label}…</p>
             </div>
           )}
-          {tabState.error && (
+          {tabError && (
             <div className="graph-loading-overlay">
-              <p style={{ color: '#F44336' }}>Error: {tabState.error}</p>
+              <p style={{ color: '#F44336' }}>Error: {tabError}</p>
             </div>
           )}
-          {!activeTab && !tabState.loading && (
+          {!activeTab && !tabLoading && (
             <Tooltip content="Pick a route or command in the left sidebar to load its dependency graph.">
               <div className="graph-placeholder">
                 <div className="placeholder-icon">
@@ -330,7 +325,7 @@ export default function App() {
               </div>
             </Tooltip>
           )}
-          {!tabState.loading && activeTab && elements.length === 0 && !tabState.error && (
+          {!tabLoading && activeTab && elements.length === 0 && !tabError && (
             <Tooltip content="This endpoint produced no analyzable nodes. It may be a closure, a redirect-only route, or outside the scanner’s rules.">
               <div className="graph-placeholder">
                 <div className="placeholder-icon">
@@ -345,7 +340,7 @@ export default function App() {
               </div>
             </Tooltip>
           )}
-          {!tabState.loading && elements.length > 0 && (
+          {!tabLoading && elements.length > 0 && (
             <GraphView
               key={activeTab?.id}
               elements={elements}
@@ -372,7 +367,7 @@ export default function App() {
         {selectedId && (
           <Sidebar
             selectedId={selectedId}
-            graphData={tabState.data}
+            graphData={tabData}
             theme={theme}
             onClose={() => setSelectedId(null)}
             onStressChange={(nodeId) => {
