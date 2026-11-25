@@ -709,13 +709,28 @@ class RouteAnalyzer
                             if ($resolved !== '') {
                                 $result[] = $resolved;
                             }
+                        } else {
+                            $built = $this->builtMiddleware($item->value);
+                            if ($built !== null) {
+                                $result[] = $built;
+                            }
                         }
                     }
 
                     return $result;
                 }
 
-                return [];
+                $built = $this->builtMiddleware($value);
+
+                return $built !== null ? [$built] : [];
+            }
+
+            private function builtMiddleware(Node $node): ?string
+            {
+                return MiddlewareExpression::resolve(
+                    $node,
+                    fn (Node\Name $class): string => PhpFileParser::resolvedName($class) ?? $this->literalClassRef(new Node\Expr\ClassConstFetch($class, 'class'))
+                );
             }
         };
 
@@ -1856,13 +1871,28 @@ class RouteAnalyzer
                             if ($resolved !== '') {
                                 $result[] = $resolved;
                             }
+                        } else {
+                            $built = $this->builtMiddleware($item->value);
+                            if ($built !== null) {
+                                $result[] = $built;
+                            }
                         }
                     }
 
                     return $result;
                 }
 
-                return [];
+                $built = $this->builtMiddleware($node);
+
+                return $built !== null ? [$built] : [];
+            }
+
+            private function builtMiddleware(Node $node): ?string
+            {
+                return MiddlewareExpression::resolve(
+                    $node,
+                    fn (Node\Name $class): string => PhpFileParser::resolvedName($class) ?? $this->extractClassRef(new Node\Expr\ClassConstFetch($class, 'class'))
+                );
             }
 
             private function extractString(?Node $node): ?string
